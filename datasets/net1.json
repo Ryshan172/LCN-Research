@@ -1,0 +1,25 @@
+{
+  "nodes": ["A", "B", "C"],
+  "edges": [["A", "B"], ["B", "C"]],
+  "credal_sets": {
+    "A": {
+      "[]": {
+        "True": [0.4, 0.6],
+        "False": [0.4, 0.6]
+      }
+    },
+    "B": {
+      "[A=True]": {
+        "True": [0.3, 0.7],
+        "False": [0.3, 0.7]
+      },
+      "[A=False]": {
+        "True": [0.6, 0.9],
+        "False": [0.1, 0.4]
+      }
+    }
+  },
+  "logical_constraints": [
+    {"if": {"A": true}, "then": {"B": false}}
+  ]
+}
