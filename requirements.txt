@@ -3,3 +3,4 @@ scipy
 pydantic
 pandas
 networkx
+pgmpy
