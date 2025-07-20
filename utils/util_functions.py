@@ -7,3 +7,9 @@ def load_json_data(filename):
 
     # return the data
     return data
+
+
+def save_outputs(results):
+    # Save text of results
+    with open("outputs/results.txt", "w") as f:
+        f.write(results)

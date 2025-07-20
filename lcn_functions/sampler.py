@@ -3,6 +3,34 @@
 import random
 import networkx as nx
 
+"""
+# Sampling Strategies for Logical Credal Networks (LCNs)
+
+This script implements a basic sampling method for Logical Credal Networks (LCNs),
+which are probabilistic models that combine interval-based uncertainty (credal sets)
+with logical constraints between variables.
+
+## How it works:
+
+1. **Topological Sampling Order**:  
+   Nodes are sampled in topological order based on the directed edges, respecting dependencies.
+
+2. **Credal Set Sampling**:  
+   For each node, a probability for "True" is randomly drawn from the defined interval
+   (credal set) conditioned on its parent values. The node's value is then sampled
+   using this probability.
+
+3. **Logical Constraint Filtering**:  
+   After sampling all nodes, the sample is checked against logical constraints.
+   If the sample violates any "if...then..." rule, it is rejected and the process restarts.
+
+4. **Repeat Until Valid**:  
+   Sampling continues until a sample satisfies all constraints, then it's returned.
+
+This method enables generating datasets consistent with both the uncertain
+credal semantics and hard logical rules of the LCN.
+
+"""
 
 def random_from_interval(interval):
     return random.uniform(interval[0], interval[1])
