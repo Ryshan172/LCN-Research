@@ -13,3 +13,9 @@ def save_outputs(results):
     # Save text of results
     with open("outputs/results.txt", "w") as f:
         f.write(results)
+
+
+def save_sampled_intervals(dataframe, lcn_name):
+    # Saves sampled dataset as csv 
+    filename = f"{lcn_name}_interval_samples.csv"
+    dataframe.to_csv(f"datasets/sampled_data/{filename}", index=False)

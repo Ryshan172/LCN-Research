@@ -16,8 +16,8 @@ def structure_results(method, results):
     return result_summary
 
 
-def generate_sample_dataset(dataset_name):
-    lcn_data = load_json_data(dataset_name)
+def generate_sample_dataset(dataset_name, filepath):
+    lcn_data = load_json_data(filepath)
     print(lcn_data)
 
     #Generate a dataset of 100 rows
@@ -25,7 +25,9 @@ def generate_sample_dataset(dataset_name):
 
     # Convert to DataFrame if needed
     df = pd.DataFrame(samples)
-    df.to_csv('lcn_samples.csv', index=False)
+    
+    # Save to csv
+    save_sampled_intervals(df, dataset_name)
 
     return df
 
@@ -35,7 +37,7 @@ def learn_structure_workflow():
     results_output = ""
 
     # Generate sample dataset
-    dataset = generate_sample_dataset("datasets/net1.json")
+    dataset = generate_sample_dataset("net1", "datasets/net1.json")
 
     # Hill Climbing structure learning
     struc = run_hillclimb_search(dataset)
