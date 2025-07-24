@@ -1,0 +1,93 @@
+{
+  "nodes": ["SmokesA", "SmokesB", "SmokesC", "CancerB", "CancerC", "FriendsAB", "FriendsBC"],
+  "edges": [
+    ["FriendsAB", "SmokesB"],
+    ["FriendsBC", "SmokesC"],
+    ["SmokesA", "SmokesB"],
+    ["SmokesB", "SmokesC"],
+    ["SmokesB", "CancerB"],
+    ["SmokesC", "CancerC"]
+  ],
+  "credal_sets": {
+    "SmokesA": {
+      "[]": {
+        "True": [0.3, 0.5],
+        "False": [0.5, 0.7]
+      }
+    },
+    "FriendsAB": {
+      "[]": {
+        "True": [0.5, 0.8],
+        "False": [0.2, 0.5]
+      }
+    },
+    "FriendsBC": {
+      "[]": {
+        "True": [0.5, 0.8],
+        "False": [0.2, 0.5]
+      }
+    },
+    "SmokesB": {
+      "[SmokesA=True, FriendsAB=True]": {
+        "True": [0.5, 0.8],
+        "False": [0.2, 0.5]
+      },
+      "[SmokesA=True, FriendsAB=False]": {
+        "True": [0.2, 0.5],
+        "False": [0.5, 0.8]
+      },
+      "[SmokesA=False, FriendsAB=True]": {
+        "True": [0.1, 0.4],
+        "False": [0.6, 0.9]
+      },
+      "[SmokesA=False, FriendsAB=False]": {
+        "True": [0.05, 0.2],
+        "False": [0.8, 0.95]
+      }
+    },
+    "SmokesC": {
+      "[SmokesB=True, FriendsBC=True]": {
+        "True": [0.5, 0.8],
+        "False": [0.2, 0.5]
+      },
+      "[SmokesB=True, FriendsBC=False]": {
+        "True": [0.2, 0.5],
+        "False": [0.5, 0.8]
+      },
+      "[SmokesB=False, FriendsBC=True]": {
+        "True": [0.1, 0.4],
+        "False": [0.6, 0.9]
+      },
+      "[SmokesB=False, FriendsBC=False]": {
+        "True": [0.05, 0.2],
+        "False": [0.8, 0.95]
+      }
+    },
+    "CancerB": {
+      "[SmokesB=True]": {
+        "True": [0.6, 0.9],
+        "False": [0.1, 0.4]
+      },
+      "[SmokesB=False]": {
+        "True": [0.01, 0.05],
+        "False": [0.95, 0.99]
+      }
+    },
+    "CancerC": {
+      "[SmokesC=True]": {
+        "True": [0.6, 0.9],
+        "False": [0.1, 0.4]
+      },
+      "[SmokesC=False]": {
+        "True": [0.01, 0.05],
+        "False": [0.95, 0.99]
+      }
+    }
+  },
+  "logical_constraints": [
+    { "if": { "FriendsAB": true }, "then": { "SmokesA": false } },
+    { "if": { "SmokesB": true }, "then": { "CancerB": true } },
+    { "if": { "SmokesB": false }, "then": { "CancerB": false } },
+    { "if": { "SmokesC": true }, "then": { "CancerC": true } }
+  ]
+}

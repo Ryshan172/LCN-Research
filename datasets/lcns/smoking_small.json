@@ -1,0 +1,35 @@
+{
+  "nodes": ["SmokesA", "SmokesB", "CancerB"],
+  "edges": [["SmokesA", "SmokesB"], ["SmokesB", "CancerB"]],
+  "credal_sets": {
+    "SmokesA": {
+      "[]": {
+        "True": [0.4, 0.6],
+        "False": [0.4, 0.6]
+      }
+    },
+    "SmokesB": {
+      "[SmokesA=True]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      },
+      "[SmokesA=False]": {
+        "True": [0.1, 0.3],
+        "False": [0.7, 0.9]
+      }
+    },
+    "CancerB": {
+      "[SmokesB=True]": {
+        "True": [0.6, 0.9],
+        "False": [0.1, 0.4]
+      },
+      "[SmokesB=False]": {
+        "True": [0.01, 0.05],
+        "False": [0.95, 0.99]
+      }
+    }
+  },
+  "logical_constraints": [
+    { "if": { "SmokesA": true }, "then": { "SmokesB": false } }
+  ]
+}

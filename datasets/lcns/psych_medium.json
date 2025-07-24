@@ -1,0 +1,126 @@
+{
+  "nodes": [
+    "Stress",
+    "Overeating",
+    "Overweight",
+    "Depression",
+    "Exercise",
+    "SleepQuality",
+    "SocialSupport",
+    "Therapy"
+  ],
+  "edges": [
+    ["Stress", "Overeating"],
+    ["Overeating", "Overweight"],
+    ["Overweight", "Depression"],
+    ["Exercise", "Overweight"],
+    ["SleepQuality", "Depression"],
+    ["SocialSupport", "Depression"],
+    ["Therapy", "SleepQuality"],
+    ["Therapy", "Depression"]
+  ],
+  "credal_sets": {
+    "Stress": {
+      "[]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      }
+    },
+    "Exercise": {
+      "[]": {
+        "True": [0.4, 0.7],
+        "False": [0.3, 0.6]
+      }
+    },
+    "Therapy": {
+      "[]": {
+        "True": [0.2, 0.5],
+        "False": [0.5, 0.8]
+      }
+    },
+    "Overeating": {
+      "[Stress=True]": {
+        "True": [0.6, 0.9],
+        "False": [0.1, 0.4]
+      },
+      "[Stress=False]": {
+        "True": [0.2, 0.5],
+        "False": [0.5, 0.8]
+      }
+    },
+    "Overweight": {
+      "[Overeating=True, Exercise=True]": {
+        "True": [0.0, 0.0],
+        "False": [1.0, 1.0]
+      },
+      "[Overeating=True, Exercise=False]": {
+        "True": [0.7, 0.9],
+        "False": [0.1, 0.3]
+      },
+      "[Overeating=False, Exercise=True]": {
+        "True": [0.0, 0.0],
+        "False": [1.0, 1.0]
+      },
+      "[Overeating=False, Exercise=False]": {
+        "True": [0.2, 0.4],
+        "False": [0.6, 0.8]
+      }
+    },
+    "SleepQuality": {
+      "[Therapy=True]": {
+        "True": [0.7, 0.9],
+        "False": [0.1, 0.3]
+      },
+      "[Therapy=False]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      }
+    },
+    "SocialSupport": {
+      "[]": {
+        "True": [0.5, 0.8],
+        "False": [0.2, 0.5]
+      }
+    },
+    "Depression": {
+      "[Overweight=True, SleepQuality=True, SocialSupport=True, Therapy=True]": {
+        "True": [0.1, 0.3],
+        "False": [0.7, 0.9]
+      },
+      "[Overweight=True, SleepQuality=True, SocialSupport=True, Therapy=False]": {
+        "True": [0.3, 0.5],
+        "False": [0.5, 0.7]
+      },
+      "[Overweight=True, SleepQuality=True, SocialSupport=False, Therapy=True]": {
+        "True": [0.2, 0.4],
+        "False": [0.6, 0.8]
+      },
+      "[Overweight=True, SleepQuality=False, SocialSupport=True, Therapy=True]": {
+        "True": [0.3, 0.5],
+        "False": [0.5, 0.7]
+      },
+      "[Overweight=False, SleepQuality=True, SocialSupport=True, Therapy=True]": {
+        "True": [0.05, 0.2],
+        "False": [0.8, 0.95]
+      },
+      "[Overweight=False, SleepQuality=True, SocialSupport=True, Therapy=False]": {
+        "True": [0.1, 0.3],
+        "False": [0.7, 0.9]
+      }
+    }
+  },
+  "logical_constraints": [
+    {
+      "if": { "Exercise": true },
+      "then": { "Overweight": false }
+    },
+    {
+      "if": { "Therapy": true },
+      "then": { "Depression": false }
+    },
+    {
+      "if": { "Therapy": true },
+      "then": { "SleepQuality": true }
+    }
+  ]
+}

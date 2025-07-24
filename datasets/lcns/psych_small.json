@@ -1,0 +1,67 @@
+{
+  "nodes": ["Stress", "Exercise", "Overeating", "Overweight", "Depression"],
+  "edges": [
+    ["Stress", "Overeating"],
+    ["Exercise", "Overweight"],
+    ["Overeating", "Overweight"],
+    ["Overweight", "Depression"]
+  ],
+  "credal_sets": {
+    "Stress": {
+      "[]": {
+        "True": [0.4, 0.6],
+        "False": [0.4, 0.6]
+      }
+    },
+    "Exercise": {
+      "[]": {
+        "True": [0.4, 0.7],
+        "False": [0.3, 0.6]
+      }
+    },
+    "Overeating": {
+      "[Stress=True]": {
+        "True": [0.6, 0.9],
+        "False": [0.1, 0.4]
+      },
+      "[Stress=False]": {
+        "True": [0.2, 0.5],
+        "False": [0.5, 0.8]
+      }
+    },
+    "Overweight": {
+      "[Overeating=True, Exercise=True]": {
+        "True": [0.0, 0.0],
+        "False": [1.0, 1.0]
+      },
+      "[Overeating=True, Exercise=False]": {
+        "True": [0.7, 0.9],
+        "False": [0.1, 0.3]
+      },
+      "[Overeating=False, Exercise=True]": {
+        "True": [0.0, 0.0],
+        "False": [1.0, 1.0]
+      },
+      "[Overeating=False, Exercise=False]": {
+        "True": [0.2, 0.4],
+        "False": [0.6, 0.8]
+      }
+    },
+    "Depression": {
+      "[Overweight=True]": {
+        "True": [0.6, 0.85],
+        "False": [0.15, 0.4]
+      },
+      "[Overweight=False]": {
+        "True": [0.1, 0.3],
+        "False": [0.7, 0.9]
+      }
+    }
+  },
+  "logical_constraints": [
+    {
+      "if": { "Exercise": true },
+      "then": { "Overweight": false }
+    }
+  ]
+}
