@@ -1,6 +1,6 @@
 import pandas as pd
 from utils.util_functions import *
-from lcn_functions.sampler import *
+from sampler_functions.sampler import *
 from structure_learning.hill_climbing import *
 from structure_learning.simulated_annealing import simulated_annealing_search
 
