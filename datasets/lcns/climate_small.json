@@ -1,0 +1,52 @@
+{
+  "nodes": ["FossilFuelUse", "GHGEmissions", "GlobalTempRise", "SeaLevelRise"],
+  "edges": [
+    ["FossilFuelUse", "GHGEmissions"],
+    ["GHGEmissions", "GlobalTempRise"],
+    ["GlobalTempRise", "SeaLevelRise"]
+  ],
+  "credal_sets": {
+    "FossilFuelUse": {
+      "[]": {
+        "True": [0.5, 0.9],
+        "False": [0.1, 0.5]
+      }
+    },
+    "GHGEmissions": {
+      "[FossilFuelUse=True]": {
+        "True": [0.7, 0.95],
+        "False": [0.05, 0.3]
+      },
+      "[FossilFuelUse=False]": {
+        "True": [0.1, 0.4],
+        "False": [0.6, 0.9]
+      }
+    },
+    "GlobalTempRise": {
+      "[GHGEmissions=True]": {
+        "True": [0.6, 0.9],
+        "False": [0.1, 0.4]
+      },
+      "[GHGEmissions=False]": {
+        "True": [0.05, 0.2],
+        "False": [0.8, 0.95]
+      }
+    },
+    "SeaLevelRise": {
+      "[GlobalTempRise=True]": {
+        "True": [0.7, 0.95],
+        "False": [0.05, 0.3]
+      },
+      "[GlobalTempRise=False]": {
+        "True": [0.1, 0.3],
+        "False": [0.7, 0.9]
+      }
+    }
+  },
+  "logical_constraints": [
+    {
+      "if": { "FossilFuelUse": false },
+      "then": { "GHGEmissions": false }
+    }
+  ]
+}

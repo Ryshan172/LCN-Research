@@ -1,0 +1,122 @@
+{
+  "nodes": [
+    "FossilFuelUse",
+    "Deforestation",
+    "RenewableAdoption",
+    "GHGEmissions",
+    "CarbonSinkLoss",
+    "GlobalTempRise",
+    "ExtremeWeather",
+    "IceMelt",
+    "SeaLevelRise",
+    "FoodInsecurity"
+  ],
+  "edges": [
+    ["FossilFuelUse", "GHGEmissions"],
+    ["Deforestation", "GHGEmissions"],
+    ["RenewableAdoption", "GHGEmissions"],
+    ["Deforestation", "CarbonSinkLoss"],
+    ["CarbonSinkLoss", "GlobalTempRise"],
+    ["GHGEmissions", "GlobalTempRise"],
+    ["GlobalTempRise", "ExtremeWeather"],
+    ["GlobalTempRise", "IceMelt"],
+    ["IceMelt", "SeaLevelRise"],
+    ["ExtremeWeather", "FoodInsecurity"]
+  ],
+  "credal_sets": {
+    "FossilFuelUse": {
+      "[]": {
+        "True": [0.5, 0.9],
+        "False": [0.1, 0.5]
+      }
+    },
+    "Deforestation": {
+      "[]": {
+        "True": [0.3, 0.7],
+        "False": [0.3, 0.7]
+      }
+    },
+    "RenewableAdoption": {
+      "[]": {
+        "True": [0.2, 0.5],
+        "False": [0.5, 0.8]
+      }
+    },
+    "GHGEmissions": {
+      "[FossilFuelUse=True, Deforestation=True, RenewableAdoption=False]": {
+        "True": [0.8, 1.0],
+        "False": [0.0, 0.2]
+      },
+      "[FossilFuelUse=False, Deforestation=False, RenewableAdoption=True]": {
+        "True": [0.1, 0.3],
+        "False": [0.7, 0.9]
+      }
+    },
+    "CarbonSinkLoss": {
+      "[Deforestation=True]": {
+        "True": [0.6, 0.9],
+        "False": [0.1, 0.4]
+      },
+      "[Deforestation=False]": {
+        "True": [0.1, 0.3],
+        "False": [0.7, 0.9]
+      }
+    },
+    "GlobalTempRise": {
+      "[GHGEmissions=True, CarbonSinkLoss=True]": {
+        "True": [0.7, 0.95],
+        "False": [0.05, 0.3]
+      }
+    },
+    "ExtremeWeather": {
+      "[GlobalTempRise=True]": {
+        "True": [0.6, 0.9],
+        "False": [0.1, 0.4]
+      }
+    },
+    "IceMelt": {
+      "[GlobalTempRise=True]": {
+        "True": [0.7, 0.95],
+        "False": [0.05, 0.3]
+      }
+    },
+    "SeaLevelRise": {
+      "[IceMelt=True]": {
+        "True": [0.6, 0.9],
+        "False": [0.1, 0.4]
+      }
+    },
+    "FoodInsecurity": {
+      "[ExtremeWeather=True]": {
+        "True": [0.5, 0.8],
+        "False": [0.2, 0.5]
+      }
+    }
+  },
+  "logical_constraints": [
+    {
+      "if": { "RenewableAdoption": true },
+      "then": { "GHGEmissions": false }
+    },
+    {
+      "if": { "FossilFuelUse": false, "Deforestation": false },
+      "then": { "GHGEmissions": false }
+    },
+    {
+      "if": { "RenewableAdoption": true },
+      "then": { "FossilFuelUse": false }
+    },
+    {
+      "if": { "GlobalTempRise": false },
+      "then": { "IceMelt": false, "ExtremeWeather": false }
+    },
+    {
+      "if": { "IceMelt": false },
+      "then": { "SeaLevelRise": false }
+    },
+    {
+      "if": { "ExtremeWeather": false },
+      "then": { "FoodInsecurity": false }
+    }
+  ]
+}
