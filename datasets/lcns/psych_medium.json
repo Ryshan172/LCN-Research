@@ -99,6 +99,22 @@
         "True": [0.3, 0.5],
         "False": [0.5, 0.7]
       },
+      "[Overweight=True, SleepQuality=False, SocialSupport=False, Therapy=True]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      },
+      "[Overweight=True, SleepQuality=False, SocialSupport=False, Therapy=False]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      },
+      "[Overweight=True, SleepQuality=False, SocialSupport=True, Therapy=False]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      },
+      "[Overweight=True, SleepQuality=True, SocialSupport=False, Therapy=False]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      },
       "[Overweight=False, SleepQuality=True, SocialSupport=True, Therapy=True]": {
         "True": [0.05, 0.2],
         "False": [0.8, 0.95]
@@ -106,6 +122,30 @@
       "[Overweight=False, SleepQuality=True, SocialSupport=True, Therapy=False]": {
         "True": [0.1, 0.3],
         "False": [0.7, 0.9]
+      },
+      "[Overweight=False, SleepQuality=True, SocialSupport=False, Therapy=True]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      },
+      "[Overweight=False, SleepQuality=True, SocialSupport=False, Therapy=False]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      },
+      "[Overweight=False, SleepQuality=False, SocialSupport=True, Therapy=True]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      },
+      "[Overweight=False, SleepQuality=False, SocialSupport=True, Therapy=False]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      },
+      "[Overweight=False, SleepQuality=False, SocialSupport=False, Therapy=True]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
+      },
+      "[Overweight=False, SleepQuality=False, SocialSupport=False, Therapy=False]": {
+        "True": [0.3, 0.6],
+        "False": [0.4, 0.7]
       }
     }
   },

@@ -58,7 +58,10 @@ def sample_from_lcn(lcn, mode="random"):
     """
     nodes = lcn["nodes"]
     edges = lcn["edges"]
-    credal_sets = lcn.get("credal_sets", {})
+    
+    # Normalize credal set keys once per call
+    credal_sets = normalize_credal_keys(lcn.get("credal_sets", {}))
+
     constraints = lcn.get("logical_constraints", [])
 
     # Build graph and determine topological order
@@ -76,6 +79,22 @@ def sample_from_lcn(lcn, mode="random"):
 
         if satisfies_constraints(sample, constraints):
             return sample
+
+def normalize_credal_keys(credal_sets):
+    normalized = {}
+    for node, entries in credal_sets.items():
+        new_entries = {}
+        for key, val in entries.items():
+            if key == "[]":
+                new_entries[key] = val
+                continue
+            stripped = key.strip("[]")
+            items = [x.strip() for x in stripped.split(',')]
+            sorted_items = sorted(items)
+            new_key = f"[{', '.join(sorted_items)}]"
+            new_entries[new_key] = val
+        normalized[node] = new_entries
+    return normalized
 
 
 def generate_interval_dataset(lcn, n=100, mode="random"):
