@@ -1,0 +1,12 @@
+Structure Learning Method: Hill Climbing
+Learned Edges:
+  Stress -> Overeating
+  Overweight -> Exercise
+  Overweight -> Overeating
+  Depression -> Overweight
+Structure Learning Method: Simulated Annealing
+Learned Edges:
+  Stress -> Overeating
+  Overweight -> Overeating
+  Overweight -> Exercise
+  Overweight -> Depression
