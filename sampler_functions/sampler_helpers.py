@@ -78,7 +78,7 @@ def sample_from_lcn(lcn, mode="random"):
             return sample
 
 
-def generate_dataset(lcn, n=100, mode="random"):
+def generate_interval_dataset(lcn, n=100, mode="random"):
     """
     Generate a dataset of valid samples from the LCN.
     Default mode is random
