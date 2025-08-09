@@ -1,5 +1,5 @@
-from generator import generate_lcn
-from validator import validate_lcn
+from .generator import generate_lcn
+from .validator import validate_lcn
 import json
 
 """

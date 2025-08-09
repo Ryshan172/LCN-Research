@@ -60,24 +60,23 @@ def generate_samples_and_learn(dataset_name, lcn_data):
     lower_df = lower_probability_sampler(lcn_data)
     learn_structure("random_lower_df", lower_df)
 
-    """
+    
     # Upper Probability 
     upper_df = upper_probability_sampler(lcn_data)
-    save_sampled_intervals(upper_df, 'upper', dataset_name)
+    learn_structure("random_upper_df", upper_df)
 
 
     # Midpoint Probability 
     midpoint_df = midpoint_probability_sampler(lcn_data)
-    save_sampled_intervals(midpoint_df, 'midpoint', dataset_name)
+    learn_structure("random_midpoint_df", midpoint_df)
 
 
     # Random Probability 
     random_df = random_probability_sampler(lcn_data)
-    save_sampled_intervals(random_df, 'random', dataset_name)
-    """
+    learn_structure("random_random_df", random_df)
 
 
-    return f"Created all sample dataset for {dataset_name}"
+    return f"Created all sample datasets for {dataset_name}"
 
 
 
@@ -85,6 +84,9 @@ def run_workflow():
 
     # Generate a random LCN
     lcn_data = generate_lcn_workflow()
+
+    # Save lcn
+    save_json_data('random_lcn1', lcn_data)
 
     generate_samples_and_learn("test_lcn", lcn_data)
 

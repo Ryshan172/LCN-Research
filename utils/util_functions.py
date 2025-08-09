@@ -10,6 +10,13 @@ def load_json_data(filename):
     return data
 
 
+def save_json_data(filename, data):
+    # Save json data according to specified name
+    json_str = json.dumps(data, indent=4)
+    with open(f"{filename}.json", "w") as f:
+        f.write(json_str)
+
+
 def save_outputs(results, dataset_name):
     # Save text of results
     with open(f"outputs/{dataset_name}_results.txt", "w") as f:
