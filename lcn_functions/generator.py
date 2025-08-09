@@ -130,7 +130,7 @@ def random_interval(width):
     high = round(low + width, 2)
     return [low, high]
 
-# ==== Example ====
-if __name__ == "__main__":
-    lcn = generate_lcn(size=5, interval_width=0.3, num_constraints=2, constraint_chaining=True)
-    print(json.dumps(lcn, indent=2))
+# # ==== Example ====
+# if __name__ == "__main__":
+#     # lcn = generate_lcn(size=5, interval_width=0.3, num_constraints=2, constraint_chaining=True)
+#     # print(json.dumps(lcn, indent=2))
