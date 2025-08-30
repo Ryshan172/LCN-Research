@@ -9,6 +9,8 @@ from sampler_functions.upper import *
 from sampler_functions.midpoint import *
 from sampler_functions.random import *
 from lcn_functions.model import generate_lcn_workflow
+from sampler_functions.forward_sampling import * 
+from sampler_functions.converted_sample import convert_and_sample
 
 
 def structure_results(method, results):
@@ -86,9 +88,16 @@ def run_workflow():
     lcn_data = generate_lcn_workflow()
 
     # Save lcn
-    save_json_data('random_lcn1', lcn_data)
+    #save_json_data('random_lcn1', lcn_data)
 
-    generate_samples_and_learn("test_lcn", lcn_data)
+    # generate_samples_and_learn("test_lcn", lcn_data)
+
+    # forward sampling
+
+    #sample_set = forward_sample(lcn_data)
+    sample_set = convert_and_sample(lcn_data)
+
+    print(sample_set)
 
 
 
