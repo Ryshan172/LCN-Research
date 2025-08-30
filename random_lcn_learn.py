@@ -88,7 +88,7 @@ def run_workflow():
     lcn_data = generate_lcn_workflow()
 
     # Save lcn
-    #save_json_data('random_lcn1', lcn_data)
+    save_json_data('random_lcn1', lcn_data)
 
     # generate_samples_and_learn("test_lcn", lcn_data)
 
@@ -96,6 +96,8 @@ def run_workflow():
 
     #sample_set = forward_sample(lcn_data)
     sample_set = convert_and_sample(lcn_data)
+
+    learn_structure("fs_sampled_1", sample_set)
 
     print(sample_set)
 
