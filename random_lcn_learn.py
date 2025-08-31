@@ -88,7 +88,7 @@ def run_workflow():
     lcn_data = generate_lcn_workflow()
 
     # Save lcn
-    save_json_data('random_lcn1', lcn_data)
+    save_json_data("random_lcn1", lcn_data)
 
     # generate_samples_and_learn("test_lcn", lcn_data)
 
