@@ -13,7 +13,7 @@ def load_json_data(filename):
 def save_json_data(filename, data):
     # Save json data according to specified name
     json_str = json.dumps(data, indent=4)
-    with open(f"{filename}.json", "w") as f:
+    with open(f"datasets/lcns/{filename}.json", "w") as f:
         f.write(json_str)
 
 
