@@ -17,8 +17,15 @@ def generate_lcn_workflow():
     # TODO: Create while loop to keep running until valid
 
     return lcn
-    
 
+
+def create_lcn(size, interval_width):
+    # Generate LCN with specified parameters
+    # TODO: Use median or standard deviation for width and constraint number, num incoming edges
+    lcn = generate_lcn(size, interval_width, num_constraints=2, constraint_chaining=True)
+    
+    return lcn
+    
 
 # Run function
 generate_lcn_workflow()

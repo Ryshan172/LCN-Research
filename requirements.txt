@@ -4,3 +4,5 @@ pydantic
 pandas
 networkx
 pgmpy
+fastapi
+uvicorn
