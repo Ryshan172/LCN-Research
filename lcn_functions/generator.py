@@ -25,7 +25,10 @@ def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chai
     """
     
     # Generate node names (e.g A, B, C) depending on size param
-    nodes = list(string.ascii_uppercase[:size])
+    #nodes = list(string.ascii_uppercase[:size])
+
+    # Using X1, X2 ...Xn node names instead
+    nodes = [f"X{i+1}" for i in range(size)]
     
     """
     Generate a random DAG. 
