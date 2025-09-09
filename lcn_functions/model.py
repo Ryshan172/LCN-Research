@@ -1,7 +1,7 @@
 from .generator import generate_lcn
 from .validator import validate_lcn
 import json
-
+from .lcn_check import validate_generated_lcn
 """
 Generating LCNs and testing if they are valid
 """
@@ -23,6 +23,10 @@ def create_lcn(size, interval_width):
     # Generate LCN with specified parameters
     # TODO: Use median or standard deviation for width and constraint number, num incoming edges
     lcn = generate_lcn(size, interval_width, num_constraints=2, constraint_chaining=True)
+
+    is_valid = validate_generated_lcn(lcn)
+
+    print(f"Is Valid: {is_valid}")
     
     return lcn
     

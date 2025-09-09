@@ -186,32 +186,50 @@ def propagate_constraints(constraints, edges):
     return new_constraints
 
 
-def create_conditional_probs(interval_width, node, condition_dict, constraints):
+def create_conditional_probs(interval_width, node, condition_dict, constraints, allow_overlap=False):
     """
     Create probability intervals for a node given its parent values,
     while respecting logical constraints if they apply.
+
+    Args:
+        interval_width (float): Width of probability interval.
+        node (str): Node name.
+        condition_dict (dict): Parent assignments for this node.
+        constraints (list): Logical constraints.
+        allow_overlap (bool): If True, True/False intervals may overlap.
+                              If False, they are complementary (non-overlapping).
     """
+
+    # Check all constraints for full parent assignment match 
     for constr in constraints:
-        # Extract 'if' variable and value
-        if_node, if_val = list(constr["if"].items())[0]
-        # Extract 'then' variable and value
         then_node, then_val = list(constr["then"].items())[0]
 
-        # If this node is constrained AND the condition matches parent assignment
-        if node == then_node and if_node in condition_dict:
-            # Enforce the constraint strictly: probability is fixed (no interval)
-            if condition_dict[if_node] == if_val:
-                if then_val is True:
-                    # Node must be true
-                    return {"True": [1.0, 1.0], "False": [0.0, 0.0]}
-                else:
-                    # Node must be false
-                    return {"True": [0.0, 0.0], "False": [1.0, 1.0]}
-    
-    # If no constraint applies, assign a random interval for both True/False outcomes
+        # Only consider constraints that apply to this node
+        if node != then_node:
+            continue
+
+        # Use all() to check if all 'if' conditions match the parent assignment
+        if all(condition_dict.get(k) == v for k, v in constr["if"].items()):
+            # Apply the constraint strictly: probability is fixed (no interval)
+            if then_val is True:
+                return {"True": [1.0, 1.0], "False": [0.0, 0.0]}
+            else:
+                return {"True": [0.0, 0.0], "False": [1.0, 1.0]}
+
+    # Generate random interval for True
+    true_low, true_high = random_interval(interval_width)
+
+    if allow_overlap:
+        # ALLOW OVERLAP: Random interval for False independently
+        false_low, false_high = random_interval(interval_width)
+    else:
+        # NO OVERLAP: False interval is complementary to True
+        false_low = round(1 - true_high, 2)
+        false_high = round(1 - true_low, 2)
+
     return {
-        "True": random_interval(interval_width),
-        "False": random_interval(interval_width)
+        "True": [true_low, true_high],
+        "False": [false_low, false_high]
     }
 
 
@@ -221,8 +239,3 @@ def random_interval(width):
     # Upper bound is fixed distance 'width' above the lower bound
     high = round(low + width, 2)
     return [low, high]
-
-# # ==== Example ====
-# if __name__ == "__main__":
-#     # lcn = generate_lcn(size=5, interval_width=0.3, num_constraints=2, constraint_chaining=True)
-#     # print(json.dumps(lcn, indent=2))
