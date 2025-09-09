@@ -6,7 +6,7 @@ from collections import deque
 from .lcn_check import check_all_nodes_connected
 
 
-def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chaining=False, edge_prob=0.4):
+def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chaining=False, edge_prob=0.4, in_degree=1):
     """
     Generate a Logical Credal Network (LCN) with:
     - A specified number of nodes (size)
@@ -16,12 +16,15 @@ def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chai
     - Optional chaining: constraints propagate through DAG
 
     Args:
-        size (int): Number of nodes in the LCN.
-        interval_width (float): Width of probability intervals (0 < width <= 1).
-        num_constraints (int or None): Number of logical constraints. If None, chosen randomly.
-        constraint_chaining (bool): If True, constraints are transitive through the DAG.
-        edge_prob: chance of an edge being added e.g. 0.4 = 40 % chance, 0.1 is sparse, 0.9 is denser
+        - size (int): Number of nodes in the LCN.
+        - interval_width (float): Width of probability intervals (0 < width <= 1).
+        - num_constraints (int or None): Number of logical constraints. If None, chosen randomly.
+        - constraint_chaining (bool): If True, constraints are transitive through the DAG.
+        - edge_prob: chance of an edge being added e.g. 0.4 = 40 % chance, 0.1 is sparse, 0.9 is denser
+        - in_degree: Integer that determines that number of incoming edges a node will have. e.g 1 means only one edge
 
+    Note: in_degree directly determines how many parents a node can have.
+    
     Returns:
         dict: LCN structure.
     """
@@ -42,24 +45,38 @@ def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chai
     - Runs in a while loop to ensure no edges are unconnected
     - Note: Remove While loop and check if unconnected edges are allowed
     """
+
+    # TODO: Implement in_degree parameter
+
     while True:
         edges = []
+        # For managing number of incoming edges to node
+        in_deg_count = {n: 0 for n in nodes}
+
         for i in range(size):
             for j in range(i + 1, size):
-                if random.random() < edge_prob:
+                # Only add edge if child (nodes[j]) has fewer than allowed parents
+                if random.random() < edge_prob and in_deg_count[nodes[j]] < in_degree:
                     edges.append([nodes[i], nodes[j]])
+                    in_deg_count[nodes[j]] += 1
         
-        if not edges:  # fallback in case none generated
-            edges.append([nodes[0], nodes[1]])
+        # fallback in case none generated
+        if not edges:
+            if in_deg_count[nodes[1]] < in_degree:
+                edges.append([nodes[0], nodes[1]])
+                in_deg_count[nodes[1]] += 1
+
 
         # check connectivity
         if check_all_nodes_connected(nodes, edges):
             break   # stop regenerating once connected
-        
+    
+
     possible_pairs = [(p, c) for p, c in edges]
     if not possible_pairs:
         edges.append([nodes[0], nodes[1]])
         possible_pairs.append((nodes[0], nodes[1]))
+
 
     # Generate LCN constraints consistent with DAG (either defined or random)
     if num_constraints is None:
