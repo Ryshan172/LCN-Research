@@ -3,6 +3,8 @@ import string
 import itertools
 import json
 from collections import deque
+from .lcn_check import check_all_nodes_connected
+
 
 def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chaining=False, edge_prob=0.4):
     """
@@ -37,18 +39,27 @@ def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chai
     - E.g. Run 1 could be A -> B, C - D, or A -> C depending on prob
     - If the random number falls below `edge_prob`, the edge is added. Otherwise it is skipped
     - i < j ensures acyclicity 
+    - Runs in a while loop to ensure no edges are unconnected
+    - Note: Remove While loop and check if unconnected edges are allowed
     """
-    edges = []
-    for i in range(size):
-        for j in range(i + 1, size):
-            if random.random() < edge_prob:
-                edges.append([nodes[i], nodes[j]])
-    
+    while True:
+        edges = []
+        for i in range(size):
+            for j in range(i + 1, size):
+                if random.random() < edge_prob:
+                    edges.append([nodes[i], nodes[j]])
+        
+        if not edges:  # fallback in case none generated
+            edges.append([nodes[0], nodes[1]])
+
+        # check connectivity
+        if check_all_nodes_connected(nodes, edges):
+            break   # stop regenerating once connected
+        
     possible_pairs = [(p, c) for p, c in edges]
     if not possible_pairs:
         edges.append([nodes[0], nodes[1]])
         possible_pairs.append((nodes[0], nodes[1]))
-    
 
     # Generate LCN constraints consistent with DAG (either defined or random)
     if num_constraints is None:
