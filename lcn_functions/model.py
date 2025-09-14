@@ -22,12 +22,27 @@ def generate_lcn_workflow():
 def create_lcn(size, interval_width):
     # Generate LCN with specified parameters
     # TODO: Use median or standard deviation for width and constraint number, num incoming edges
-    lcn = generate_lcn(size, interval_width, num_constraints=2, constraint_chaining=True)
-
-    is_valid = validate_generated_lcn(lcn)
-
-    print(f"Is Valid: {is_valid}")
     
+    # Running in loop to ensure only valid LCN is outputted
+    
+    is_valid = False
+    attempts = 0
+    max_attempts=10
+
+    while not is_valid and attempts < max_attempts:
+        attempts += 1
+
+        # Generate candidate LCN
+        lcn = generate_lcn(size, interval_width, num_constraints=2, constraint_chaining=True)
+
+        # Validate candidate LCN
+        is_valid = validate_generated_lcn(lcn)
+
+        print(f"Attempt {attempts}: Is Valid? {is_valid}")
+
+    if not is_valid:
+        raise RuntimeError(f"Failed to generate valid LCN after {max_attempts} attempts.")
+
     return lcn
     
 

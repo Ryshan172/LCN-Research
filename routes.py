@@ -4,6 +4,8 @@ from lcn_functions.model import create_lcn
 from typing import Dict, Any, List
 from sampler_functions.converted_sample import convert_and_sample
 import pandas as pd
+from sampler_functions.contingency_sampler import run_aggregate_sampler
+from scoring_functions.interval_bic_score import compute_interval_bic_score
 
 router = APIRouter()
 
@@ -39,7 +41,16 @@ def process(request: LCNRequest):
 def forward_sample(request: LCN):
     try:
         # Pass the full LCN object to your sampler
-        samples_df = convert_and_sample(request.dict())  # <-- full LCN dict
+        #samples_df = convert_and_sample(request.dict())  # <-- full LCN dict
+
+        # Running aggregate sampler instead
+        samples_df = run_aggregate_sampler(request.dict())
+        # print(samples_df.head())
+        samples_df.to_csv("lcn_dataset.csv", index=False)
+
+        # Compute BIC score
+        compute_interval_bic_score(samples_df)
+
         samples_json = samples_df.to_dict(orient="records")
         return {"samples": samples_json}
     except Exception as e:
