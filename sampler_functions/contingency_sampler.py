@@ -124,6 +124,7 @@ def aggregate_intervals(samples, structure):
 
 def run_aggregate_sampler(lcn):
     samples = sample_dataset(lcn, num_samples=1000)
+    print(samples)
     df = aggregate_intervals(samples, lcn)
 
     return df
