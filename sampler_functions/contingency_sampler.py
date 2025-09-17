@@ -121,11 +121,77 @@ def aggregate_intervals(samples, structure):
     return pd.DataFrame(rows)
 
 
+def credal_aggregate_intervals(samples, structure):
+    """
+    Aggregate sampled data into contingency table with interval counts.
+    For each (node, parent config), compute lower/upper counts per state.
+
+    CHANGES from aggregate_intervals:
+    - Instead of collapsing counts to a single value [count, count],
+      we now use the credal set probability intervals to compute
+      lower and upper bounds for counts.
+    - This way the table reflects epistemic uncertainty directly
+      from the model, not just the realized sample.
+    """
+    nodes = structure["nodes"]
+    edges = structure["edges"]
+
+    rows = []
+
+    for node in nodes:
+        parents = [u for u, v in edges if v == node]
+        # Enumerate all parent configurations
+        parent_configs = list(itertools.product([False, True], repeat=len(parents)))
+
+        for config in parent_configs:
+            config_dict = dict(zip(parents, config))
+
+            # Filter samples that match this parent config
+            filtered = [s for s in samples if all(s[p] == val for p, val in config_dict.items())]
+
+            N_total = len(filtered)
+
+            if N_total == 0:
+                continue
+
+            # ---- CHANGE: use credal set intervals for probability bounds ----
+            if parents:
+                key = "[" + ",".join(f"{p}={config_dict[p]}" for p in parents) + "]"
+            else:
+                key = "[]"
+
+            credal = structure["credal_sets"][node][key]
+
+            p_true_low, p_true_high = credal["True"]
+            p_false_low, p_false_high = credal["False"]
+
+            # Convert probability intervals into count intervals
+            count_true_lower = int(N_total * p_true_low)
+            count_true_upper = int(N_total * p_true_high)
+            count_false_lower = int(N_total * p_false_low)
+            count_false_upper = int(N_total * p_false_high)
+
+            # ---- Result row with widened intervals ----
+            row = {
+                "node": node,
+                "parent_config": ",".join(f"{p}={v}" for p, v in config_dict.items()) or "[]",
+                "N_total": N_total,
+                "count_false_lower": count_false_lower,
+                "count_false_upper": count_false_upper,
+                "count_true_lower": count_true_lower,
+                "count_true_upper": count_true_upper
+            }
+            rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
 
 def run_aggregate_sampler(lcn):
     samples = sample_dataset(lcn, num_samples=1000)
     print(samples)
-    df = aggregate_intervals(samples, lcn)
+    # df = aggregate_intervals(samples, lcn)
+    df = credal_aggregate_intervals(samples, lcn)
 
     return df
 
@@ -133,7 +199,7 @@ def run_aggregate_sampler(lcn):
 # ---------- Example usage ----------
 
 if __name__ == "__main__":
-    # The LCN you gave
+    # Example LCN structure
     lcn = {
         "nodes": ["X1", "X2", "X3", "X4", "X5"],
         "edges": [["X1","X2"],["X1","X4"],["X1","X5"],["X2","X3"]],
