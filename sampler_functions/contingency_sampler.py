@@ -188,40 +188,17 @@ def credal_aggregate_intervals(samples, structure):
 
 
 def run_aggregate_sampler(lcn):
-    samples = sample_dataset(lcn, num_samples=1000)
-    print(samples)
-    # df = aggregate_intervals(samples, lcn)
-    df = credal_aggregate_intervals(samples, lcn)
+    forward_samples = sample_dataset(lcn, num_samples=1000)
 
-    return df
+    # Convert to dataframe
+    samples_df = pd.DataFrame(forward_samples)
 
+    # Save samples
+    samples_save_file = "lcn_forward_samples.csv"
 
-# ---------- Example usage ----------
+    samples_df.to_csv(f"datasets/contingency_samples/{samples_save_file}", index=False)
 
-if __name__ == "__main__":
-    # Example LCN structure
-    lcn = {
-        "nodes": ["X1", "X2", "X3", "X4", "X5"],
-        "edges": [["X1","X2"],["X1","X4"],["X1","X5"],["X2","X3"]],
-        "credal_sets": {
-            "X1": {"[]": {"True":[0.56,0.86],"False":[0.14,0.44]}},
-            "X2": {"[X1=True]":{"True":[1.0,1.0],"False":[0.0,0.0]},
-                   "[X1=False]":{"True":[0.14,0.44],"False":[0.56,0.86]}},
-            "X3": {"[X2=True]":{"True":[0.41,0.71],"False":[0.29,0.59]},
-                   "[X2=False]":{"True":[0.14,0.44],"False":[0.56,0.86]}},
-            "X4": {"[X1=True]":{"True":[0.1,0.4],"False":[0.6,0.9]},
-                   "[X1=False]":{"True":[0.0,0.0],"False":[1.0,1.0]}},
-            "X5": {"[X1=True]":{"True":[0.14,0.44],"False":[0.56,0.86]},
-                   "[X1=False]":{"True":[0.24,0.54],"False":[0.46,0.76]}}
-        },
-        "logical_constraints": [
-            {"if":{"X1":True}, "then":{"X2":True}},
-            {"if":{"X1":False}, "then":{"X4":False}}
-        ]
-    }
+    # Compute aggregate contingency table
+    aggregate_df = credal_aggregate_intervals(forward_samples, lcn)
 
-    samples = sample_dataset(lcn, num_samples=1000)
-    df = aggregate_intervals(samples, lcn)
-
-    print(df.head())
-    df.to_csv("lcn_dataset.csv", index=False)
+    return aggregate_df
