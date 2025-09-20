@@ -19,11 +19,12 @@ def generate_lcn_workflow():
     return lcn
 
 
-def create_lcn(size, interval_width):
-    # Generate LCN with specified parameters
-    # TODO: Use median or standard deviation for width and constraint number, num incoming edges
-    
+def create_lcn(size, interval_width, width_dist="beta"):
+    """
+    Generate LCN with specified parameters
+  
     # Running in loop to ensure only valid LCN is outputted
+    """
     
     is_valid = False
     attempts = 0
@@ -33,7 +34,7 @@ def create_lcn(size, interval_width):
         attempts += 1
 
         # Generate candidate LCN
-        lcn = generate_lcn(size, interval_width, num_constraints=2, constraint_chaining=True)
+        lcn = generate_lcn(size, interval_width, num_constraints=2, constraint_chaining=True, dist_type=width_dist)
 
         # Validate candidate LCN
         is_valid = validate_generated_lcn(lcn)
