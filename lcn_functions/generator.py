@@ -4,9 +4,10 @@ import itertools
 import json
 from collections import deque
 from .lcn_check import check_all_nodes_connected
+import numpy as np
 
 
-def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chaining=False, edge_prob=0.4, in_degree=1):
+def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chaining=False, edge_prob=0.4, in_degree=1, dist_type="beta"):
     """
     Generate a Logical Credal Network (LCN) with:
     - A specified number of nodes (size)
@@ -122,8 +123,9 @@ def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chai
         if not parents:
             # If node has no parents (root node) than condition key is empty
             cond_key = "[]"
-            credal_sets[node][cond_key] = create_conditional_probs(
-                interval_width, node, {}, logical_constraints
+            # Note: Changed to us randomised interval withs function
+            credal_sets[node][cond_key] = create_random_width_conditional_probs(
+                interval_width, node, {}, logical_constraints, dist_type
             )
         else:
             # If the node has parents, generate all possible truth assignments for the parents
@@ -134,8 +136,8 @@ def generate_lcn(size, interval_width=0.2, num_constraints=None, constraint_chai
                 cond_key = "[" + ", ".join(f"{p}={str(v)}" for p, v in condition_dict.items()) + "]"
 
                 # Create conditional credal set for this configuration
-                credal_sets[node][cond_key] = create_conditional_probs(
-                    interval_width, node, condition_dict, logical_constraints
+                credal_sets[node][cond_key] = create_random_width_conditional_probs(
+                    interval_width, node, condition_dict, logical_constraints, dist_type
                 )
     
     return {
@@ -230,6 +232,89 @@ def create_conditional_probs(interval_width, node, condition_dict, constraints, 
     return {
         "True": [true_low, true_high],
         "False": [false_low, false_high]
+    }
+
+
+def create_random_width_conditional_probs(interval_width, node, condition_dict, constraints, dist_type="beta", beta_params=(2,2), allow_overlap=False,):
+    """
+    Create probability intervals for a node given its parent values,
+    while respecting logical constraints if they apply.
+
+    Args:
+        interval_width (float): Default/fallback width of probability interval.
+        node (str): Node name.
+        condition_dict (dict): Parent assignments for this node.
+        constraints (list): Logical constraints.
+        allow_overlap (bool): If True, True/False intervals may overlap.
+                              If False, they are complementary (non-overlapping).
+        dist_type (str): Distribution type for mean probability: "beta", "gaussian", "uniform", "triangular".
+        beta_params (tuple): (alpha, beta) for Beta distribution.
+    
+    Interval Width: 
+    - Instead of fixed-width random interval, uses Beta-based mean + random width
+    - Instead of always using a fixed interval width, the code now samples a mean probability 
+        from a Beta distribution and a random width from a Gaussian.
+    - This makes intervals more diverse and realistic, reducing bias by allowing some credal sets 
+        to be narrow (high confidence) and others wide (high uncertainty).
+    
+    - Larger interval_width → on average wider intervals.
+    - Smaller interval_width → on average narrower intervals.
+    - But every individual interval is slightly different, adding diversity and avoiding bias.
+
+    Using a Beta distribution lets you randomly generate probabilities within [0,1] while controlling the shape, 
+    so some values cluster near 0, 0.5, or 1, creating realistic variability in the credal sets.
+    """
+
+    # Check all constraints for full parent assignment match 
+    for constr in constraints:
+        then_node, then_val = list(constr["then"].items())[0]
+
+        # Only consider constraints that apply to this node
+        if node != then_node:
+            continue
+
+        # Use all() to check if all 'if' conditions match the parent assignment
+        if all(condition_dict.get(k) == v for k, v in constr["if"].items()):
+            # Apply the constraint strictly: probability is fixed (no interval)
+            if then_val is True:
+                return {"True": [1.0, 1.0], "False": [0.0, 0.0]}
+            else:
+                return {"True": [0.0, 0.0], "False": [1.0, 1.0]}
+            
+
+    if dist_type == "beta":
+        alpha, beta = beta_params
+        p = np.random.beta(alpha, beta)
+    elif dist_type == "gaussian":
+        p = random.gauss(0.5, 0.15)
+        p = min(max(p, 0.0), 1.0)
+    elif dist_type == "uniform":
+        p = random.uniform(0.0, 1.0)
+    elif dist_type == "triangular":
+        p = random.triangular(0.0, 1.0, 0.5)
+    else:
+        raise ValueError(f"Unknown dist_type: {dist_type}")
+
+
+    # Sample width and compute interval
+    width = max(0.01, min(0.5, random.gauss(interval_width, 0.05)))
+    true_low = max(0.0, p - width / 2)
+    true_high = min(1.0, p + width / 2)
+
+    if allow_overlap:
+        # Independent False interval
+        false_interval = create_random_width_conditional_probs(interval_width, node, condition_dict,
+                                                               [], allow_overlap=False,
+                                                               dist_type=dist_type, beta_params=beta_params)
+        false_low, false_high = false_interval["True"]
+    else:
+        # Complementary False interval
+        false_low = round(1 - true_high, 2)
+        false_high = round(1 - true_low, 2)
+
+    return {
+        "True": [round(true_low, 2), round(true_high, 2)],
+        "False": [round(false_low, 2), round(false_high, 2)]
     }
 
 

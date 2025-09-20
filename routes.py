@@ -14,6 +14,7 @@ router = APIRouter()
 class LCNRequest(BaseModel):
     size: int
     interval_width: float
+    width_dist: str
 
 
 class LCN(BaseModel):
@@ -33,8 +34,9 @@ def process(request: LCNRequest):
         # Generate and return an LCN with the input parameters 
         size = request.size
         interval_width = request.interval_width
+        width_dist_type = request.width_dist
 
-        lcn = create_lcn(size, interval_width)
+        lcn = create_lcn(size, interval_width, width_dist_type)
         
         # save lcn as a file 
         save_json_data("generated_lcn", lcn)
