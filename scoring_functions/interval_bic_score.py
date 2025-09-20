@@ -47,6 +47,7 @@ def compute_interval_bic_score(aggregate_table):
     # BIC Calculation
     # Total samples
     M = aggregate_table["N_total"].sum()
+
     # Very rough: 1 parameter per row (can refine)
     dim_G = len(aggregate_table)
     penalty = (math.log(M) / 2.0) * dim_G
@@ -56,3 +57,11 @@ def compute_interval_bic_score(aggregate_table):
 
     print("Log-likelihood interval: ", (ll_min_total, ll_max_total))
     print("BIC interval: ", (bic_min, bic_max))
+
+    # Return object with BIC interval scores
+    bic_results = {
+        "bic_min_val": bic_min,
+        "bic_max_val": bic_max
+    }
+
+    return bic_results

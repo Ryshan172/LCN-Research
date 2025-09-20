@@ -6,6 +6,7 @@ from sampler_functions.converted_sample import convert_and_sample
 import pandas as pd
 from sampler_functions.contingency_sampler import run_aggregate_sampler
 from scoring_functions.interval_bic_score import compute_interval_bic_score
+from utils.util_functions import save_json_data
 
 router = APIRouter()
 
@@ -24,6 +25,9 @@ class LCN(BaseModel):
 
 @router.post("/create-basic-lcn")
 def process(request: LCNRequest):
+    """
+    This is the workflow for generating a tree-shaped lcn
+    """
 
     try:
         # Generate and return an LCN with the input parameters 
@@ -31,6 +35,10 @@ def process(request: LCNRequest):
         interval_width = request.interval_width
 
         lcn = create_lcn(size, interval_width)
+        
+        # save lcn as a file 
+        save_json_data("generated_lcn", lcn)
+
         return lcn 
     
     except Exception as e:
@@ -39,19 +47,34 @@ def process(request: LCNRequest):
 
 @router.post("/forward-sample")
 def forward_sample(request: LCN):
-    try:
-        # Pass the full LCN object to your sampler
-        #samples_df = convert_and_sample(request.dict())  # <-- full LCN dict
+    """
+    This is the current workflow for forward sampling and scoring a generated LCN
+    """
 
-        # Running aggregate sampler instead
+    try:
+        # Set save location and file names
+        dataset_path = "datasets/contingency_samples"
+        contingency_save_file = "contingency_table.csv"
+
+        # Running aggregate sampler instead of convert and sample
         samples_df = run_aggregate_sampler(request.dict())
-        # print(samples_df.head())
-        samples_df.to_csv("lcn_dataset.csv", index=False)
+        print(samples_df)
+
+        # Save samples 
+        samples_df.to_csv(f"{dataset_path}/{contingency_save_file}", index=False)
+        
+        samples_json = samples_df.to_dict(orient="records")
 
         # Compute BIC score
-        compute_interval_bic_score(samples_df)
+        bic_score_result = compute_interval_bic_score(samples_df)
 
-        samples_json = samples_df.to_dict(orient="records")
-        return {"samples": samples_json}
+        # Return object
+        result = {
+            "samples": samples_json,
+            "bic_scores": bic_score_result
+        }
+    
+        return result 
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error sampling lcn: {e}")

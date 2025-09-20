@@ -1,0 +1,10 @@
+node,parent_config,N_total,count_false_lower,count_false_upper,count_true_lower,count_true_upper
+X1,[],1000,510,810,190,490
+X2,X1=False,676,331,534,141,344
+X2,X1=True,324,93,191,132,230
+X3,X1=False,676,0,0,676,676
+X3,X1=True,324,324,324,0,0
+X4,X1=False,676,344,547,128,331
+X4,X1=True,324,51,149,174,272
+X5,X2=False,606,24,206,399,581
+X5,X2=True,394,153,271,122,240
