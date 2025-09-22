@@ -52,4 +52,42 @@ def run_workflow():
     learn_structure('psych_small_random_samples')
 
 # Run main method
-run_workflow()
+#run_workflow()
+
+
+def learn_structure_lcn_samples(dataset_name, dataset):
+    """
+    Use the forward sampled LCN data to structure learn. 
+    - Greedy Hill Climbing
+    - Simulated Annealing 
+    
+    Returns:
+        dict with arrays of edges for each method
+    """
+
+    results_output = ""
+
+    # Hill Climbing structure learning
+    hc_edges = run_hillclimb_search(dataset)
+
+    # Create and save output
+    results1 = structure_results("Hill Climbing", hc_edges)
+    results_output += results1
+
+    # Simulated Annealing Search
+    sa_edges = simulated_annealing_search(dataset)
+    results2 = structure_results("Simulated Annealing", sa_edges)
+    results_output += results2
+
+    # Save final results
+    #save_outputs(results_output, dataset_name)
+
+    print("Completed structure learning and saved outputs")
+
+    # Return edges in arrays
+    result = {
+        "hill_climbing": list(hc_edges),
+        "sim_annealing": list(sa_edges)
+    }
+
+    return result
