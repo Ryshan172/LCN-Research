@@ -201,4 +201,4 @@ def run_aggregate_sampler(lcn):
     # Compute aggregate contingency table
     aggregate_df = credal_aggregate_intervals(forward_samples, lcn)
 
-    return aggregate_df
+    return aggregate_df, samples_df
