@@ -1,5 +1,7 @@
 # Collapse the LCN to a Bayesian Network and then sample 
 
+# Not ideal since it doesn't capture the epistemic uncertainty as well. 
+
 import random
 from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 from pgmpy.factors.discrete import TabularCPD
