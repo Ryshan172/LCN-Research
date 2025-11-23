@@ -51,10 +51,11 @@ def sample_dataset(structure, num_samples=1000):
 
         # Go in topological order (here: assume given nodes list is topological enough)
         for node in nodes:
-            # Find parent values
-            parents = [u for u, v in edges if v == node]
+            # Find parent values (sorted to fix multiple incoming edge issue)
+            parents = sorted([u for u, v in edges if v == node])
+
             if parents:
-                key = "[" + ",".join(f"{p}={sample[p]}" for p in parents) + "]"
+                key = "[" + ", ".join(f"{p}={sample[p]}" for p in parents) + "]" 
             else:
                 key = "[]"
 
@@ -109,7 +110,7 @@ def aggregate_intervals(samples, structure):
             # (later you can widen to model epistemic uncertainty)
             row = {
                 "node": node,
-                "parent_config": ",".join(f"{p}={v}" for p, v in config_dict.items()) or "[]",
+                "parent_config": ", ".join(f"{p}={v}" for p, v in config_dict.items()) or "[]",
                 "N_total": N_total,
                 "count_false_lower": count_false,
                 "count_false_upper": count_false,
@@ -156,7 +157,7 @@ def credal_aggregate_intervals(samples, structure):
 
             # ---- CHANGE: use credal set intervals for probability bounds ----
             if parents:
-                key = "[" + ",".join(f"{p}={config_dict[p]}" for p in parents) + "]"
+                key = "[" + ", ".join(f"{p}={config_dict[p]}" for p in parents) + "]"
             else:
                 key = "[]"
 
@@ -174,7 +175,7 @@ def credal_aggregate_intervals(samples, structure):
             # ---- Result row with widened intervals ----
             row = {
                 "node": node,
-                "parent_config": ",".join(f"{p}={v}" for p, v in config_dict.items()) or "[]",
+                "parent_config": ", ".join(f"{p}={v}" for p, v in config_dict.items()) or "[]",
                 "N_total": N_total,
                 "count_false_lower": count_false_lower,
                 "count_false_upper": count_false_upper,
