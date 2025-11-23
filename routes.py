@@ -43,9 +43,20 @@ def process(request: LCNRequest):
 
         lcn = create_lcn(size, interval_width, width_dist_type, in_degree)
         
-        # save lcn as a file 
-        save_json_data("generated_lcn", lcn)
+        # Save LCN and parameters
+        output_data = {
+            "lcn": lcn,
+            "parameters": {
+                "size": size,
+                "interval_width": interval_width,
+                "width_dist_type": width_dist_type,
+                "in_degree": in_degree
+            }
+        }
 
+        save_json_data("generated_lcn", output_data)
+
+        # Return generated LCN
         return lcn 
     
     except Exception as e:
