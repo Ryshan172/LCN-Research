@@ -19,7 +19,7 @@ def generate_lcn_workflow():
     return lcn
 
 
-def create_lcn(size, interval_width, width_dist="beta"):
+def create_lcn(size, interval_width, width_dist="beta", incoming=1):
     """
     Generate LCN with specified parameters
   
@@ -34,7 +34,7 @@ def create_lcn(size, interval_width, width_dist="beta"):
         attempts += 1
 
         # Generate candidate LCN
-        lcn = generate_lcn(size, interval_width, num_constraints=2, constraint_chaining=True, dist_type=width_dist)
+        lcn = generate_lcn(size, interval_width, num_constraints=2, constraint_chaining=True, dist_type=width_dist, in_degree=incoming)
 
         # Validate candidate LCN
         is_valid = validate_generated_lcn(lcn)

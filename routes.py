@@ -18,6 +18,7 @@ class LCNRequest(BaseModel):
     size: int
     interval_width: float
     width_dist: str
+    incoming_edges: int
 
 
 class LCN(BaseModel):
@@ -38,8 +39,9 @@ def process(request: LCNRequest):
         size = request.size
         interval_width = request.interval_width
         width_dist_type = request.width_dist
+        in_degree = request.incoming_edges
 
-        lcn = create_lcn(size, interval_width, width_dist_type)
+        lcn = create_lcn(size, interval_width, width_dist_type, in_degree)
         
         # save lcn as a file 
         save_json_data("generated_lcn", lcn)
