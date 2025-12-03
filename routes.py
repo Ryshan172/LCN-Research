@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from lcn_functions.model import create_lcn
 from typing import Dict, Any, List
+from sampler_functions.bn_topological import bn_to_json, build_precise_bn_from_lcn
 from sampler_functions.converted_sample import convert_and_sample
 import pandas as pd
 from sampler_functions.contingency_sampler import run_aggregate_sampler
@@ -151,3 +152,36 @@ def forward_sample(request: LCN):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error sampling lcn: {e}")
+
+
+#-------------------Bayesian Network Sampling from LCN---------------------------
+
+@router.post("/sample-bn-from-lcn")
+def forward_sample(request: LCN):
+    """
+    Sample a single precise Bayesian Network from an LCN,
+    save the BN as JSON, and return sampled states.
+    """
+    try:
+        lcn_dict = request.dict(by_alias=True)
+        
+        # Sample one precise BN
+        model, sampled_states = build_precise_bn_from_lcn(lcn_dict)
+
+        print("\n--- Sampled world state ---")
+        print(sampled_states)
+
+        # Convert BN to JSON
+        bn_json = bn_to_json(model)
+
+        # Save BN JSON to file
+        save_json_data("sampled_bn", bn_json)
+
+        # Return JSON response
+        return {
+            "sampled_states": sampled_states,
+            "bn": bn_json
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error sampling BN from LCN: {e}")
