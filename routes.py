@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from lcn_functions.model import create_lcn
 from typing import Dict, Any, List
-from sampler_functions.bn_topological import bn_to_json, build_precise_bn_from_lcn
+from sampler_functions.bn_topological import ancestral_sample_bn, bn_to_json, build_precise_bn_from_lcn
 from sampler_functions.converted_sample import convert_and_sample
 import pandas as pd
 from sampler_functions.contingency_sampler import run_aggregate_sampler
@@ -157,7 +157,7 @@ def forward_sample(request: LCN):
 #-------------------Bayesian Network Sampling from LCN---------------------------
 
 @router.post("/sample-bn-from-lcn")
-def forward_sample(request: LCN):
+def sample_bn_from_lcn(request: LCN):
     """
     Sample a single precise Bayesian Network from an LCN,
     save the BN as JSON, and return sampled states.
@@ -168,6 +168,10 @@ def forward_sample(request: LCN):
         # Sample one precise BN
         model, sampled_states = build_precise_bn_from_lcn(lcn_dict)
 
+        # Model sanity check
+        model_correct = model.check_model()
+        print(f"Model correct: {model_correct}")
+
         print("\n--- Sampled world state ---")
         print(sampled_states)
 
@@ -176,6 +180,11 @@ def forward_sample(request: LCN):
 
         # Save BN JSON to file
         save_json_data("sampled_bn", bn_json)
+
+        # Run forward sampling on the bayesian network
+        bn_forward_samples = ancestral_sample_bn(model, n_samples=100)
+
+        print(bn_forward_samples)
 
         # Return JSON response
         return {

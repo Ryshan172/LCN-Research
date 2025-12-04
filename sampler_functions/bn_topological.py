@@ -5,6 +5,7 @@ from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.factors.discrete import TabularCPD
 import itertools
 import numpy as np
+from pgmpy.sampling import BayesianModelSampling
 
 
 """
@@ -122,6 +123,11 @@ def build_precise_bn_from_lcn(lcn):
     """
     Sample a single precise Bayesian Network from a Logical Credal Network (LCN)
     using topological order. Returns a pgmpy DiscreteBayesianNetwork and sampled states.
+
+    FIXED VERSION:
+    - Each parent configuration gets its own CPT column.
+    - Logical constraints applied per parent configuration.
+    - Credal intervals sampled independently per configuration.
     """
 
     nodes = lcn["nodes"]
@@ -129,62 +135,95 @@ def build_precise_bn_from_lcn(lcn):
     credal_sets = lcn["credal_sets"]
     constraints = lcn.get("logical_constraints", [])
 
-    # Get parents of each node
+    # Build parent lists
     parents = defaultdict(list)
     for p, c in edges:
         parents[c].append(p)
 
-    # Topological order
+    # Compute topological order
     topo_order = topological_sort(nodes, edges)
 
-    # Store sampled states for propagation
+    # Store sampled world state
     sampled_states = {}
 
-    # Initialize DiscreteBayesianNetwork
+    # Build BN model
     model = DiscreteBayesianNetwork(edges)
 
-    # Build CPTs
+    # Build CPTs in topological order
     for node in topo_order:
         parent_list = parents[node]
 
-        # Current parent configuration based on sampled states
-        pc = {p: sampled_states[p] for p in parent_list}
-        pc_string = "[]" if not pc else "[" + ", ".join(f"{k}={v}" for k, v in pc.items()) + "]"
+        # Case 1: Node has NO parents
+        if not parent_list:
+            pc_string = "[]"
 
-        # Apply logical constraints
-        forced_value = apply_logical_constraints(node, pc, constraints)
-
-        if forced_value is not None:
-            # Deterministic CPT
-            values = [[1.0 if forced_value else 0.0],
-                      [0.0 if forced_value else 1.0]]
-        else:
-            # Sample from credal interval
             credal_row = credal_sets[node][pc_string]
             p_true = sample_from_interval(credal_row["True"])
             p_false = 1.0 - p_true
-            values = [[p_true], [p_false]]
 
-        # Sample actual state for propagation
-        sampled_states[node] = random.random() < values[0][0]
+            # Sample the world state
+            sampled_states[node] = random.random() < p_true
+
+            cpd = TabularCPD(
+                variable=node,
+                variable_card=2,
+                values=[[p_true], [p_false]]
+            )
+
+            model.add_cpds(cpd)
+            continue
+
+        # Case 2: Node HAS parents
+        n_parents = len(parent_list)
+        n_combinations = 2 ** n_parents
+
+        # Initialize CPT rows: True row + False row
+        full_values = [
+            [0.0] * n_combinations,  # True probabilities
+            [0.0] * n_combinations   # False probabilities
+        ]
+
+        # Iterate over all parent configurations in pgmpy order
+        for idx, config in enumerate(itertools.product([False, True], repeat=n_parents)):
+
+            pc_cfg = dict(zip(parent_list, config))
+            pc_string = "[" + ", ".join(f"{k}={v}" for k, v in pc_cfg.items()) + "]"
+
+            # Apply constraints for THIS configuration
+            forced_value = apply_logical_constraints(node, pc_cfg, constraints)
+
+            if forced_value is not None:
+                # Deterministic row
+                p_true = 1.0 if forced_value else 0.0
+            else:
+                # Sample p(True) from credal intervals for THIS configuration
+                credal_row = credal_sets[node][pc_string]
+                p_true = sample_from_interval(credal_row["True"])
+
+            p_false = 1.0 - p_true
+
+            # Write probabilities
+            full_values[0][idx] = p_true
+            full_values[1][idx] = p_false
+
+        # Use the *actual* parent state that occurred in the sample
+        actual_pc = {p: sampled_states[p] for p in parent_list}
+        actual_config = tuple(actual_pc[p] for p in parent_list)
+        actual_idx = list(itertools.product([False, True], repeat=n_parents)).index(actual_config)
+
+        sampled_states[node] = random.random() < full_values[0][actual_idx]
 
         # Create TabularCPD
-        if not parent_list:
-            cpd = TabularCPD(variable=node, variable_card=2, values=values)
-        else:
-            n_combinations = 2 ** len(parent_list)
-            full_values = [[0]*n_combinations, [0]*n_combinations]
+        parent_card = [2] * n_parents
 
-            # Find index of sampled parent combination
-            idx = sum(2**(len(parent_list)-i-1) if pc[p] else 0 for i, p in enumerate(parent_list))
-            full_values[0][idx] = values[0][0]
-            full_values[1][idx] = values[1][0]
+        cpd = TabularCPD(
+            variable=node,
+            variable_card=2,
+            values=full_values,
+            evidence=parent_list,
+            evidence_card=parent_card
+        )
 
-            parent_card = [2] * len(parent_list)
-            cpd = TabularCPD(variable=node, variable_card=2, values=full_values,
-                             evidence=parent_list, evidence_card=parent_card)
-
-        # Add CPT to model
         model.add_cpds(cpd)
 
     return model, sampled_states
@@ -225,3 +264,25 @@ def bn_to_json(model: DiscreteBayesianNetwork):
         "edges": edges,
         "cpts": cpts
     }
+
+
+def ancestral_sample_bn(model: DiscreteBayesianNetwork, n_samples: int = 1):
+    """
+    Running ancestral (forward) sampling on a bayesian network.
+
+    Args:
+        model: DiscreteBayesianNetwork object (sampled from LCN)
+        n_samples: number of samples to draw
+    """
+
+    sampler = BayesianModelSampling(model)
+    
+    # Draw samples from the BN
+    df_samples = sampler.forward_sample(size=n_samples)
+    
+    # Convert each row to a dict
+    #samples_list = df_samples.to_dict(orient='records')
+
+    return df_samples
+    
+    #return samples_list
