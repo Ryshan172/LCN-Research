@@ -1,6 +1,7 @@
 import random
 import itertools
 import pandas as pd
+import math
 
 # ---------- Helper functions ----------
 
@@ -124,55 +125,58 @@ def aggregate_intervals(samples, structure):
 
 def credal_aggregate_intervals(samples, structure):
     """
-    Aggregate sampled data into contingency table with interval counts.
-    For each (node, parent config), compute lower/upper counts per state.
+    Compute contingency table intervals using both:
+    - Samples (to respect logical constraints and observed parent configs)
+    - Credal sets (to compute interval counts for each node/parent config)
 
-    CHANGES from aggregate_intervals:
-    - Instead of collapsing counts to a single value [count, count],
-      we now use the credal set probability intervals to compute
-      lower and upper bounds for counts.
-    - This way the table reflects epistemic uncertainty directly
-      from the model, not just the realized sample.
+    This preserves the observed valid parent configurations but uses
+    credal sets to determine the lower/upper bounds of counts.
     """
+    import itertools
+    import pandas as pd
+
     nodes = structure["nodes"]
     edges = structure["edges"]
-
     rows = []
 
     for node in nodes:
         parents = [u for u, v in edges if v == node]
-        # Enumerate all parent configurations
         parent_configs = list(itertools.product([False, True], repeat=len(parents)))
 
         for config in parent_configs:
             config_dict = dict(zip(parents, config))
 
             # Filter samples that match this parent config
-            filtered = [s for s in samples if all(s[p] == val for p, val in config_dict.items())]
-
+            filtered = [s for s in samples if all(s.get(p) == val for p, val in config_dict.items())]
             N_total = len(filtered)
-
             if N_total == 0:
-                continue
+                continue  # skip configurations that never occur in samples
 
-            # ---- CHANGE: use credal set intervals for probability bounds ----
+            # Build key for credal set lookup
             if parents:
-                key = "[" + ", ".join(f"{p}={config_dict[p]}" for p in parents) + "]"
+                key = "[" + ", ".join(f"{p}={'True' if config_dict[p] else 'False'}" for p in parents) + "]"
             else:
                 key = "[]"
 
-            credal = structure["credal_sets"][node][key]
+            credal_node = structure["credal_sets"].get(node, {})
+            credal = credal_node.get(key, {"True": [0.5, 0.5], "False": [0.5, 0.5]})
 
-            p_true_low, p_true_high = credal["True"]
-            p_false_low, p_false_high = credal["False"]
+            # Normalize probabilities
+            p_true_low, p_true_high = credal.get("True", [0.5, 0.5])
+            p_false_low, p_false_high = credal.get("False", [0.5, 0.5])
+            sum_low = max(p_true_low + p_false_low, 1e-8)
+            sum_high = max(p_true_high + p_false_high, 1e-8)
+            p_true_low /= sum_low
+            p_false_low /= sum_low
+            p_true_high /= sum_high
+            p_false_high /= sum_high
 
-            # Convert probability intervals into count intervals
-            count_true_lower = int(N_total * p_true_low)
-            count_true_upper = int(N_total * p_true_high)
-            count_false_lower = int(N_total * p_false_low)
-            count_false_upper = int(N_total * p_false_high)
+            # Compute interval counts using floor/ceil to preserve full interval
+            count_true_lower = math.floor(N_total * p_true_low)
+            count_true_upper = math.ceil(N_total * p_true_high)
+            count_false_lower = N_total - count_true_upper
+            count_false_upper = N_total - count_true_lower
 
-            # ---- Result row with widened intervals ----
             row = {
                 "node": node,
                 "parent_config": ", ".join(f"{p}={v}" for p, v in config_dict.items()) or "[]",
