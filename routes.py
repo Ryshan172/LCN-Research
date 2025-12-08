@@ -116,7 +116,7 @@ def forward_sample(request: LCN):
         contingency_save_file = "contingency_table.csv"
 
         # Running aggregate sampler instead of convert and sample
-        aggregate_df, forward_samples_df = run_aggregate_sampler(request.dict())
+        aggregate_df, forward_samples_df = run_aggregate_sampler(request.dict(), num_samples=100)
         print(aggregate_df)
 
         # Save samples 
