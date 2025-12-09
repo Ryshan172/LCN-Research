@@ -1,14 +1,26 @@
+import os
+os.environ["JOBLIB_MULTIPROCESSING"] = "0"
+os.environ["JOBLIB_START_METHOD"] = "spawn"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_MAX_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
 import random
 import math
 import networkx as nx
 from simanneal import Annealer
-from pgmpy.models import BayesianModel
+from pgmpy.models import DiscreteBayesianNetwork as BayesianModel
 from pgmpy.estimators import BIC
+
 
 """
 Using the Simanneal packacge to run simulated annealing on the 
 forward sample bayesian network dataset
 """
+
+# Prevent joblib from using multiprocessing (the cause of the signal error)
+os.environ["JOBLIB_MULTIPROCESSING"] = "0"
+os.environ["JOBLIB_START_METHOD"] = "threading"
 
 
 class BNAnnealer(Annealer):
@@ -36,6 +48,10 @@ class BNAnnealer(Annealer):
             The dataset forward-sampled from the true Bayesian Network.
             Used to compute the BIC score of each candidate structure.
         """
+
+        # Fix for pgmpy scoring inside simanneal threads
+        os.environ["JOBLIB_MULTIPROCESSING"] = "0"
+        os.environ["JOBLIB_START_METHOD"] = "threading"
 
         # Store dataset
         self.df = df
