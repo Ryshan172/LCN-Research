@@ -33,7 +33,7 @@ def satisfies_constraints(sample, constraints):
 
 # ---------- Main sampling procedure ----------
 
-def sample_dataset(structure, num_samples=1000):
+def sample_dataset(structure, num_samples=100):
     """
     Sample synthetic data from the given LCN.
     structure: dict with nodes, edges, credal_sets, and logical_constraints
@@ -192,8 +192,8 @@ def credal_aggregate_intervals(samples, structure):
 
 
 
-def run_aggregate_sampler(lcn):
-    forward_samples = sample_dataset(lcn, num_samples=1000)
+def run_aggregate_sampler(lcn, num_samples=100):
+    forward_samples = sample_dataset(lcn, num_samples)
 
     # Convert to dataframe
     samples_df = pd.DataFrame(forward_samples)

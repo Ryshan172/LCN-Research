@@ -6,3 +6,4 @@ networkx
 pgmpy
 fastapi
 uvicorn
+simanneal
