@@ -12,6 +12,8 @@ from learn_structure import learn_structure_lcn_samples
 from pgmpy.estimators import BIC as BicScore
 from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 
+from workflows.rq1_experiments import experiment_run_controller
+
 router = APIRouter()
 
 # Define request schema
@@ -194,3 +196,14 @@ def sample_bn_from_lcn(request: LCN):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error sampling BN from LCN: {e}")
+
+
+
+@router.post("/run-sample-experiment")
+def run_sample_experiment():
+    
+    try:
+        experiment_run_controller()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error running experiments: {e}")
