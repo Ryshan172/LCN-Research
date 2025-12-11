@@ -116,41 +116,21 @@ def run_structural_hamming_distance(true_model, learned_bn_dict):
 
 def interval_bic_structure_learn(credal_aggregate_table, lcn_forward_samples):
     """
-    Using the aggregate table for the LCN and 
-    forward (ancestral) sample dataset to:
-    - Compute the Interval BIC score
-    - Use the BIC score and samples to structure learn using heuristics
+    Run greedy hill climbing with interval BIC, returning three networks
+    for lower, mid, and upper BIC.
     """
+    results = {}
+    for scoring in ['low', 'mid', 'high']:
+        edges, score = run_interval_bic_hillclimb(lcn_forward_samples, credal_aggregate_table, scoring)
+        results[scoring] = {'edges': edges, 'score': score}
 
-    # Compute the interval BIC
-    nodes_bic = compute_interval_BIC(credal_aggregate_table)
-    print(nodes_bic)
+    # Compute the full network interval BIC from the contingency table
+    interval_per_node = compute_interval_BIC(credal_aggregate_table)
+    network_interval = compute_network_interval_BIC(interval_per_node)
 
-    # Sum the BIC for the network
-    lcn_interval_bic = compute_network_interval_BIC(nodes_bic)
-
-    # example interval bic = [np.float64(657.6413625899679), np.float64(885.8454583492511)]
-
-    lower, upper = lcn_interval_bic
-    mid = (lower + upper) / 2
-
-    print(lcn_interval_bic)
-    print(f"Interval BIC: lower={lower}, mid={mid}, upper={upper}")
-
-    # 2. Run three hill-climbing searches
-    results_lower = run_interval_bic_hillclimb(lcn_forward_samples, lower)
-    results_mid   = run_interval_bic_hillclimb(lcn_forward_samples, mid)
-    results_upper = run_interval_bic_hillclimb(lcn_forward_samples, upper)
-
-    # 3. Return all three results in JSON-like dictionary
-    return {
-        "lower": {"edges": results_lower[0], "score": results_lower[1]},
-        "mid":   {"edges": results_mid[0], "score": results_mid[1]},
-        "upper": {"edges": results_upper[0], "score": results_upper[1]},
-    }
-
-    """TODO: Need to fix code to have a per-parent set BIC because that's what the heuristic approaches need"""
-
+    results['network_interval'] = network_interval  # [lower, upper]
+    
+    return results
 
 
 def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_samples):
