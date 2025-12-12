@@ -101,6 +101,8 @@ def run_structural_hamming_distance(true_model, learned_bn_dict):
     (both HillClimbing and Simulated Annealing).
     """
 
+    print(learned_bn_dict)
+
     true_edges = list(true_model.edges())
 
     hc_edges = learned_bn_dict["hillclimb_edges"]
@@ -131,6 +133,27 @@ def interval_bic_structure_learn(credal_aggregate_table, lcn_forward_samples):
     results['network_interval'] = network_interval  # [lower, upper]
     
     return results
+
+
+def run_interval_lcn_shd(true_model, interval_bic_results):
+    """
+    Compute SHD between the true baseline BN structure and the
+    LCN structures learned using interval BIC (low, mid, high).
+    """
+    
+    true_edges = list(true_model.edges())
+    
+    shd_results = {}
+    
+    for scoring in ['low', 'mid', 'high']:
+        learned_edges = list(interval_bic_results[scoring]['edges'])
+        
+        shd_value = structural_hamming_distance_compare(true_edges, learned_edges)
+        
+        shd_results[f"{scoring}_shd"] = shd_value
+
+    return shd_results
+
 
 
 def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_samples):
@@ -168,7 +191,9 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
     print(interval_bic_results)
 
 
-    # (4.2) Compute SHD between baseline BN and learned structure 
+    # (4.2) Compute SHD between baseline BN and learned LCN structures 
+    interval_lcn_shd_results = run_interval_lcn_shd(model, interval_bic_results)
+    print(interval_lcn_shd_results)
 
 
     # (5) Compute KL divergence between distributions 
@@ -195,7 +220,7 @@ def experiment_run_controller():
     size = 5
     interval_width = 0.2
     width_dist_type = "beta"
-    in_degree = 1
+    in_degree = 2
     num_samples = 100
 
 
