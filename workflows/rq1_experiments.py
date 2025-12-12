@@ -1,4 +1,5 @@
 from lcn_functions.model import create_lcn
+from metric_functions.kl_divergence import kl_divergence_from_samples
 from metric_functions.structural_hamming_distance import structural_hamming_distance_compare
 from sampler_functions.bn_topological import ancestral_sample_bn, build_precise_bn_from_lcn
 from sampler_functions.contingency_sampler import credal_aggregate_intervals, sample_dataset
@@ -197,6 +198,22 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
 
 
     # (5) Compute KL divergence between distributions 
+
+    # KL divergence between baseline BN and Learned BN 
+
+    print("Params")
+    print("model", model)
+    print("learned_bn", learned_bn)
+    print("forward samples", bn_forward_samples)
+
+    kl_baseline_vs_learned = kl_divergence_from_samples(
+        true_model=model,
+        approx_model=learned_bn,
+        samples_df=bn_forward_samples
+    )
+
+    print(kl_baseline_vs_learned)
+
 
 
     return 
