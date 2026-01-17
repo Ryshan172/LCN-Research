@@ -7,6 +7,8 @@ import pandas as pd
 from scoring_functions.interval_bic_derivation import compute_interval_BIC, compute_network_interval_BIC
 from structure_learning.hill_climbing import run_hillclimbing_bic, run_interval_bic_hillclimb
 from structure_learning.sim_anneal import run_simanneal_sa
+from pgmpy.models import DiscreteBayesianNetwork
+from pgmpy.estimators import MaximumLikelihoodEstimator
 
 
 """
@@ -156,6 +158,31 @@ def run_interval_lcn_shd(true_model, interval_bic_results):
     return shd_results
 
 
+def build_bn_from_lcn_learned(interval_bic_results, baseline_bn, baseline_bn_samples):
+    # Since all 3 LCN-BNs from 'Interval BIC Results' have the same structure, just need to evaluate one (mid) 
+    
+    # Extract the learned BIC structure 
+    lcn_edges = list(interval_bic_results['mid']['edges'])
+
+    # Convert to a list explicitly for pgmpy
+    lcn_edges = list(lcn_edges)
+
+     # Build a BN from the LCN-learned structure
+    lcn_learned_bn = DiscreteBayesianNetwork(lcn_edges)
+
+    # Ensure node alignment with the baseline BN
+    lcn_learned_bn.add_nodes_from(baseline_bn.nodes())
+
+    # Fit Paramerters using baseline BN forward samples
+    lcn_learned_bn.fit(
+        baseline_bn_samples,
+        estimator=MaximumLikelihoodEstimator
+    )
+
+    # Now, there is a fully specified BN, Structure came from Interval-BIC, Parameters came from Data
+    return lcn_learned_bn
+
+
 
 def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_samples):
     """
@@ -168,6 +195,8 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
 
     # (2.1) Sample Baseline Bayesian Network
     model, sampled_states = generate_baseline_bn(gen_lcn)
+    print('Model')
+    print(model)
 
     
     # (2.2) Sample LCN and create Contingency Table
@@ -189,6 +218,7 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
 
     # (4.1) Learn LCN structure with interval BIC and heuristic approaches
     interval_bic_results = interval_bic_structure_learn(lcn_aggregate_table, lcn_samples_df)
+    print('Interval BIC Results')
     print(interval_bic_results)
 
 
@@ -199,22 +229,47 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
 
     # (5) Compute KL divergence between distributions 
 
-    # KL divergence between baseline BN and Learned BN 
+    # (5.1) KL divergence between baseline BN and Learned BN 
 
     print("Params")
     print("model", model)
     print("learned_bn", learned_bn)
     print("forward samples", bn_forward_samples)
 
+    # Extract structure
+    edges = list(learned_bn['hillclimb_edges']) 
+
+    # Build BN
+    learned_bn_model = DiscreteBayesianNetwork(edges)
+    learned_bn_model.add_nodes_from(model.nodes())
+
+    # Fit parameters
+    learned_bn_model.fit(bn_forward_samples)
+
     kl_baseline_vs_learned = kl_divergence_from_samples(
         true_model=model,
-        approx_model=learned_bn,
+        approx_model=learned_bn_model,
         samples_df=bn_forward_samples
     )
 
+    print("KL Baseline vs Learned BN")
     print(kl_baseline_vs_learned)
 
 
+    # (5.2) Compute KL Divergence between baseline BN and LCN-Learned BN 
+
+    # Get specified LCN-Learned BN to use 
+    lcn_learned_bn = build_bn_from_lcn_learned(interval_bic_results, model, bn_forward_samples)
+
+    # Compute KL Divergence
+    kl_baseline_vs_lcn_learned = kl_divergence_from_samples(
+        true_model=model,
+        approx_model=lcn_learned_bn,
+        samples_df=bn_forward_samples
+    )
+
+    print("KL Baseline vs LCN-learned")
+    print(kl_baseline_vs_lcn_learned)
 
     return 
 
@@ -237,8 +292,8 @@ def experiment_run_controller():
     size = 5
     interval_width = 0.2
     width_dist_type = "beta"
-    in_degree = 2
-    num_samples = 100
+    in_degree = 1
+    num_samples = 300
 
 
     run_workflow_config(size, interval_width, width_dist_type, in_degree, num_samples)

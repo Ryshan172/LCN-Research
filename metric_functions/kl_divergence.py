@@ -37,6 +37,12 @@ def kl_divergence_from_samples(true_model, approx_model, samples_df):
     Returns:
         float: KL divergence
     """
+
+    print("Debugging")
+    print("true_model", true_model)
+    print("approx_model", approx_model)
+    print("samples_df", samples_df)
+
     kl_sum = 0.0
     n = len(samples_df)
 
