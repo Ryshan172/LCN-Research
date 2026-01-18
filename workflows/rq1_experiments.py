@@ -271,7 +271,43 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
     print("KL Baseline vs LCN-learned")
     print(kl_baseline_vs_lcn_learned)
 
-    return 
+
+    # (6) Return results and data for saving
+    
+    return {
+        "config": {
+            "size": size,
+            "interval_width": interval_width,
+            "width_dist_type": width_dist_type,
+            "in_degree": in_degree,
+            "num_samples": num_samples,
+        },
+        "lcn": gen_lcn,
+        "baseline_bn": {
+            "model": model,
+            "sampled_states": sampled_states,
+            "forward_samples": bn_forward_samples,
+        },
+        "baseline_structure_learning": {
+            "learned_bn": learned_bn,
+            "shd": baseline_shd_results,
+        },
+        "interval_bic_learning": {
+            "interval_bic_results": interval_bic_results,
+            "interval_lcn_shd": interval_lcn_shd_results,
+        },
+        "kl_divergence": {
+            "baseline_vs_learned_bn": kl_baseline_vs_learned,
+            "baseline_vs_lcn_learned_bn": kl_baseline_vs_lcn_learned,
+        },
+        "intermediate": {
+            "lcn_aggregate_table": lcn_aggregate_table,
+            "lcn_samples_df": lcn_samples_df,
+            "learned_bn_model": learned_bn_model,
+            "lcn_learned_bn_model": lcn_learned_bn,
+        }
+    }
+
 
 
 
@@ -296,6 +332,6 @@ def experiment_run_controller():
     num_samples = 300
 
 
-    run_workflow_config(size, interval_width, width_dist_type, in_degree, num_samples)
+    results1 = run_workflow_config(size, interval_width, width_dist_type, in_degree, num_samples)
 
-    return
+    return results1
