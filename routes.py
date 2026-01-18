@@ -7,6 +7,7 @@ from sampler_functions.converted_sample import convert_and_sample
 import pandas as pd
 from sampler_functions.contingency_sampler import run_aggregate_sampler
 from scoring_functions.interval_bic_score import compute_interval_bic_score
+from utils.data_saving import save_experiment_to_json
 from utils.util_functions import save_json_data
 from learn_structure import learn_structure_lcn_samples
 from pgmpy.estimators import BIC as BicScore
@@ -201,9 +202,19 @@ def sample_bn_from_lcn(request: LCN):
 
 @router.post("/run-sample-experiment")
 def run_sample_experiment():
-    
     try:
-        experiment_run_controller()
+        experiment_res = experiment_run_controller()
+
+        run_id, file_path = save_experiment_to_json(experiment_res)
+
+        return {
+            "status": "success",
+            "run_id": run_id,
+            "result_file": file_path,
+        }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error running experiments: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error running experiments: {e}"
+        )

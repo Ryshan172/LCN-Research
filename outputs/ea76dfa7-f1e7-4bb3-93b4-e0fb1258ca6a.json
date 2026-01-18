@@ -1,0 +1,354 @@
+{
+  "config": {
+    "size": 5,
+    "interval_width": 0.2,
+    "width_dist_type": "beta",
+    "in_degree": 1,
+    "num_samples": 300
+  },
+  "lcn": {
+    "nodes": [
+      "X1",
+      "X2",
+      "X3",
+      "X4",
+      "X5"
+    ],
+    "edges": [
+      [
+        "X1",
+        "X2"
+      ],
+      [
+        "X1",
+        "X3"
+      ],
+      [
+        "X1",
+        "X4"
+      ],
+      [
+        "X1",
+        "X5"
+      ]
+    ],
+    "credal_sets": {
+      "X1": {
+        "[]": {
+          "True": [
+            0.29,
+            0.43
+          ],
+          "False": [
+            0.57,
+            0.71
+          ]
+        }
+      },
+      "X2": {
+        "[X1=True]": {
+          "True": [
+            0.41,
+            0.66
+          ],
+          "False": [
+            0.34,
+            0.59
+          ]
+        },
+        "[X1=False]": {
+          "True": [
+            1.0,
+            1.0
+          ],
+          "False": [
+            0.0,
+            0.0
+          ]
+        }
+      },
+      "X3": {
+        "[X1=True]": {
+          "True": [
+            0.68,
+            0.85
+          ],
+          "False": [
+            0.15,
+            0.32
+          ]
+        },
+        "[X1=False]": {
+          "True": [
+            0.84,
+            1.0
+          ],
+          "False": [
+            0.0,
+            0.16
+          ]
+        }
+      },
+      "X4": {
+        "[X1=True]": {
+          "True": [
+            0.33,
+            0.56
+          ],
+          "False": [
+            0.44,
+            0.67
+          ]
+        },
+        "[X1=False]": {
+          "True": [
+            0.5,
+            0.72
+          ],
+          "False": [
+            0.28,
+            0.5
+          ]
+        }
+      },
+      "X5": {
+        "[X1=True]": {
+          "True": [
+            0.0,
+            0.15
+          ],
+          "False": [
+            0.85,
+            1.0
+          ]
+        },
+        "[X1=False]": {
+          "True": [
+            0.0,
+            0.0
+          ],
+          "False": [
+            1.0,
+            1.0
+          ]
+        }
+      }
+    },
+    "logical_constraints": [
+      {
+        "if": {
+          "X1": false
+        },
+        "then": {
+          "X2": true
+        }
+      },
+      {
+        "if": {
+          "X1": false
+        },
+        "then": {
+          "X5": false
+        }
+      }
+    ]
+  },
+  "baseline_bn": {
+    "model": {
+      "type": "DiscreteBayesianNetwork",
+      "nodes": [
+        "X1",
+        "X2",
+        "X3",
+        "X4",
+        "X5"
+      ],
+      "edges": [
+        [
+          "X1",
+          "X2"
+        ],
+        [
+          "X1",
+          "X3"
+        ],
+        [
+          "X1",
+          "X4"
+        ],
+        [
+          "X1",
+          "X5"
+        ]
+      ]
+    },
+    "sampled_states": {
+      "X1": true,
+      "X2": true,
+      "X3": true,
+      "X4": true,
+      "X5": false
+    },
+    "forward_samples": {
+      "type": "DataFrame",
+      "shape": [
+        300,
+        5
+      ],
+      "columns": [
+        "X1",
+        "X2",
+        "X3",
+        "X4",
+        "X5"
+      ]
+    }
+  },
+  "baseline_structure_learning": {
+    "learned_bn": {
+      "hillclimb_edges": {},
+      "hillclimb_bic": -767.7688458173442
+    },
+    "shd": {
+      "hillclimb_shd": {
+        "shd": 1,
+        "missing": [
+          [
+            "X1",
+            "X4"
+          ]
+        ],
+        "extra": [],
+        "orientation_errors": 0
+      }
+    }
+  },
+  "interval_bic_learning": {
+    "interval_bic_results": {
+      "low": {
+        "edges": {},
+        "score": 1887.8163036418075
+      },
+      "mid": {
+        "edges": {},
+        "score": 1954.0673563543567
+      },
+      "high": {
+        "edges": {},
+        "score": 2020.3184090669058
+      },
+      "network_interval": [
+        1887.8163036418077,
+        2020.3184090669058
+      ]
+    },
+    "interval_lcn_shd": {
+      "low_shd": {
+        "shd": 0,
+        "missing": [],
+        "extra": [],
+        "orientation_errors": 0
+      },
+      "mid_shd": {
+        "shd": 0,
+        "missing": [],
+        "extra": [],
+        "orientation_errors": 0
+      },
+      "high_shd": {
+        "shd": 0,
+        "missing": [],
+        "extra": [],
+        "orientation_errors": 0
+      }
+    }
+  },
+  "kl_divergence": {
+    "baseline_vs_learned_bn": -0.024291660565509656,
+    "baseline_vs_lcn_learned_bn": -0.024368914416629892
+  },
+  "intermediate": {
+    "lcn_aggregate_table": {
+      "type": "DataFrame",
+      "shape": [
+        9,
+        7
+      ],
+      "columns": [
+        "node",
+        "parent_config",
+        "N_total",
+        "count_false_lower",
+        "count_false_upper",
+        "count_true_lower",
+        "count_true_upper"
+      ]
+    },
+    "lcn_samples_df": {
+      "type": "DataFrame",
+      "shape": [
+        300,
+        5
+      ],
+      "columns": [
+        "X1",
+        "X2",
+        "X3",
+        "X4",
+        "X5"
+      ]
+    },
+    "learned_bn_model": {
+      "type": "DiscreteBayesianNetwork",
+      "nodes": [
+        "X1",
+        "X2",
+        "X5",
+        "X3",
+        "X4"
+      ],
+      "edges": [
+        [
+          "X1",
+          "X2"
+        ],
+        [
+          "X1",
+          "X5"
+        ],
+        [
+          "X1",
+          "X3"
+        ]
+      ]
+    },
+    "lcn_learned_bn_model": {
+      "type": "DiscreteBayesianNetwork",
+      "nodes": [
+        "X1",
+        "X2",
+        "X3",
+        "X5",
+        "X4"
+      ],
+      "edges": [
+        [
+          "X1",
+          "X2"
+        ],
+        [
+          "X1",
+          "X3"
+        ],
+        [
+          "X1",
+          "X5"
+        ],
+        [
+          "X1",
+          "X4"
+        ]
+      ]
+    }
+  }
+}
