@@ -325,6 +325,7 @@ def experiment_run_controller():
     - 5. Number of samples in ancestral sampling (100, 200, 300 etc)
     """
 
+    # Parameters 
     size = 5
     interval_width = 0.2
     width_dist_type = "beta"
@@ -334,4 +335,16 @@ def experiment_run_controller():
 
     results1 = run_workflow_config(size, interval_width, width_dist_type, in_degree, num_samples)
 
-    return results1
+    # Returning results and params
+    experiment_obj = {
+        "params": {
+            "size": size,
+            "interval_width": interval_width,
+            "width_dist_type": width_dist_type,
+            "in_degree": in_degree,
+            "num_samples": num_samples,
+        },
+        "results": results1
+    }
+
+    return experiment_obj

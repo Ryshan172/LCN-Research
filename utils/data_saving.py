@@ -35,10 +35,9 @@ def make_json_safe(obj):
         return obj
 
 
-def save_experiment_to_json(experiment_res, output_dir="outputs"):
+def save_experiment_to_json(experiment_res, run_id, output_dir="outputs"):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    run_id = str(uuid.uuid4())
     file_path = Path(output_dir) / f"{run_id}.json"
 
     json_safe_res = make_json_safe(experiment_res)
@@ -46,4 +45,4 @@ def save_experiment_to_json(experiment_res, output_dir="outputs"):
     with open(file_path, "w") as f:
         json.dump(json_safe_res, f, indent=2)
 
-    return run_id, str(file_path)
+    return str(file_path)

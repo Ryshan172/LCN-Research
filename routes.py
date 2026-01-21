@@ -205,7 +205,10 @@ def run_sample_experiment():
     try:
         experiment_res = experiment_run_controller()
 
-        run_id, file_path = save_experiment_to_json(experiment_res)
+        # Hardcoding RunID for now
+        run_id = "run1"
+
+        file_path = save_experiment_to_json(experiment_res, run_id)
 
         return {
             "status": "success",
