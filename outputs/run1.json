@@ -1,0 +1,372 @@
+{
+  "params": {
+    "size": 5,
+    "interval_width": 0.2,
+    "width_dist_type": "beta",
+    "in_degree": 1,
+    "num_samples": 300
+  },
+  "results": {
+    "config": {
+      "size": 5,
+      "interval_width": 0.2,
+      "width_dist_type": "beta",
+      "in_degree": 1,
+      "num_samples": 300
+    },
+    "lcn": {
+      "nodes": [
+        "X1",
+        "X2",
+        "X3",
+        "X4",
+        "X5"
+      ],
+      "edges": [
+        [
+          "X1",
+          "X2"
+        ],
+        [
+          "X2",
+          "X3"
+        ],
+        [
+          "X2",
+          "X4"
+        ],
+        [
+          "X4",
+          "X5"
+        ]
+      ],
+      "credal_sets": {
+        "X1": {
+          "[]": {
+            "True": [
+              0.24,
+              0.33
+            ],
+            "False": [
+              0.67,
+              0.76
+            ]
+          }
+        },
+        "X2": {
+          "[X1=True]": {
+            "True": [
+              0.5,
+              0.76
+            ],
+            "False": [
+              0.24,
+              0.5
+            ]
+          },
+          "[X1=False]": {
+            "True": [
+              0.59,
+              0.74
+            ],
+            "False": [
+              0.26,
+              0.41
+            ]
+          }
+        },
+        "X3": {
+          "[X2=True]": {
+            "True": [
+              0.0,
+              0.0
+            ],
+            "False": [
+              1.0,
+              1.0
+            ]
+          },
+          "[X2=False]": {
+            "True": [
+              0.82,
+              0.88
+            ],
+            "False": [
+              0.12,
+              0.18
+            ]
+          }
+        },
+        "X4": {
+          "[X2=True]": {
+            "True": [
+              0.0,
+              0.0
+            ],
+            "False": [
+              1.0,
+              1.0
+            ]
+          },
+          "[X2=False]": {
+            "True": [
+              0.79,
+              0.93
+            ],
+            "False": [
+              0.07,
+              0.21
+            ]
+          }
+        },
+        "X5": {
+          "[X4=True]": {
+            "True": [
+              0.24,
+              0.47
+            ],
+            "False": [
+              0.53,
+              0.76
+            ]
+          },
+          "[X4=False]": {
+            "True": [
+              0.63,
+              0.84
+            ],
+            "False": [
+              0.16,
+              0.37
+            ]
+          }
+        }
+      },
+      "logical_constraints": [
+        {
+          "if": {
+            "X2": true
+          },
+          "then": {
+            "X4": false
+          }
+        },
+        {
+          "if": {
+            "X2": true
+          },
+          "then": {
+            "X3": false
+          }
+        }
+      ]
+    },
+    "baseline_bn": {
+      "model": {
+        "type": "DiscreteBayesianNetwork",
+        "nodes": [
+          "X1",
+          "X2",
+          "X3",
+          "X4",
+          "X5"
+        ],
+        "edges": [
+          [
+            "X1",
+            "X2"
+          ],
+          [
+            "X2",
+            "X3"
+          ],
+          [
+            "X2",
+            "X4"
+          ],
+          [
+            "X4",
+            "X5"
+          ]
+        ]
+      },
+      "sampled_states": {
+        "X1": false,
+        "X2": false,
+        "X3": true,
+        "X4": true,
+        "X5": true
+      },
+      "forward_samples": {
+        "type": "DataFrame",
+        "shape": [
+          300,
+          5
+        ],
+        "columns": [
+          "X1",
+          "X2",
+          "X3",
+          "X4",
+          "X5"
+        ]
+      }
+    },
+    "baseline_structure_learning": {
+      "learned_bn": {
+        "hillclimb_edges": {},
+        "hillclimb_bic": -732.2993784649174
+      },
+      "shd": {
+        "hillclimb_shd": {
+          "shd": 3,
+          "missing": [
+            [
+              "X1",
+              "X2"
+            ]
+          ],
+          "extra": [
+            [
+              "X2",
+              "X1"
+            ]
+          ],
+          "orientation_errors": 1
+        }
+      }
+    },
+    "interval_bic_learning": {
+      "interval_bic_results": {
+        "low": {
+          "edges": {},
+          "score": 2512.7489664062764
+        },
+        "mid": {
+          "edges": {},
+          "score": 2495.267961245451
+        },
+        "high": {
+          "edges": {},
+          "score": 2477.7869560846248
+        },
+        "network_interval": [
+          2512.7489664062764,
+          2477.7869560846248
+        ]
+      },
+      "interval_lcn_shd": {
+        "low_shd": {
+          "shd": 0,
+          "missing": [],
+          "extra": [],
+          "orientation_errors": 0
+        },
+        "mid_shd": {
+          "shd": 0,
+          "missing": [],
+          "extra": [],
+          "orientation_errors": 0
+        },
+        "high_shd": {
+          "shd": 0,
+          "missing": [],
+          "extra": [],
+          "orientation_errors": 0
+        }
+      }
+    },
+    "kl_divergence": {
+      "baseline_vs_learned_bn": -0.002399050113592709,
+      "baseline_vs_lcn_learned_bn": -0.0023990501135927435
+    },
+    "intermediate": {
+      "lcn_aggregate_table": {
+        "type": "DataFrame",
+        "shape": [
+          9,
+          7
+        ],
+        "columns": [
+          "node",
+          "parent_config",
+          "N_total",
+          "count_false_lower",
+          "count_false_upper",
+          "count_true_lower",
+          "count_true_upper"
+        ]
+      },
+      "lcn_samples_df": {
+        "type": "DataFrame",
+        "shape": [
+          300,
+          5
+        ],
+        "columns": [
+          "X1",
+          "X2",
+          "X3",
+          "X4",
+          "X5"
+        ]
+      },
+      "learned_bn_model": {
+        "type": "DiscreteBayesianNetwork",
+        "nodes": [
+          "X2",
+          "X4",
+          "X3",
+          "X1",
+          "X5"
+        ],
+        "edges": [
+          [
+            "X2",
+            "X4"
+          ],
+          [
+            "X2",
+            "X3"
+          ],
+          [
+            "X2",
+            "X1"
+          ],
+          [
+            "X4",
+            "X5"
+          ]
+        ]
+      },
+      "lcn_learned_bn_model": {
+        "type": "DiscreteBayesianNetwork",
+        "nodes": [
+          "X1",
+          "X2",
+          "X4",
+          "X3",
+          "X5"
+        ],
+        "edges": [
+          [
+            "X1",
+            "X2"
+          ],
+          [
+            "X2",
+            "X4"
+          ],
+          [
+            "X2",
+            "X3"
+          ],
+          [
+            "X4",
+            "X5"
+          ]
+        ]
+      }
+    }
+  }
+}
