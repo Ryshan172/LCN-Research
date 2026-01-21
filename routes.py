@@ -8,6 +8,7 @@ import pandas as pd
 from sampler_functions.contingency_sampler import run_aggregate_sampler
 from scoring_functions.interval_bic_score import compute_interval_bic_score
 from utils.data_saving import save_experiment_to_json
+from utils.data_summaries import summarise_experiments_to_csv
 from utils.util_functions import save_json_data
 from learn_structure import learn_structure_lcn_samples
 from pgmpy.estimators import BIC as BicScore
@@ -206,9 +207,16 @@ def run_sample_experiment():
         experiment_res = experiment_run_controller()
 
         # Hardcoding RunID for now
-        run_id = "run1"
+        run_id = "run2"
 
         file_path = save_experiment_to_json(experiment_res, run_id)
+
+
+        # Summarising results of all experiments in outputs
+        df = summarise_experiments_to_csv(
+            input_dir="outputs",
+            output_csv="experiment_summary.csv"
+        )
 
         return {
             "status": "success",

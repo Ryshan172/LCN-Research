@@ -28,77 +28,77 @@
           "X2"
         ],
         [
-          "X2",
+          "X1",
           "X3"
         ],
         [
-          "X2",
-          "X4"
+          "X1",
+          "X5"
         ],
         [
-          "X4",
-          "X5"
+          "X3",
+          "X4"
         ]
       ],
       "credal_sets": {
         "X1": {
           "[]": {
             "True": [
-              0.24,
-              0.33
+              0.72,
+              0.9
             ],
             "False": [
-              0.67,
-              0.76
+              0.1,
+              0.28
             ]
           }
         },
         "X2": {
           "[X1=True]": {
             "True": [
-              0.5,
-              0.76
-            ],
-            "False": [
-              0.24,
-              0.5
-            ]
-          },
-          "[X1=False]": {
-            "True": [
-              0.59,
-              0.74
-            ],
-            "False": [
-              0.26,
-              0.41
-            ]
-          }
-        },
-        "X3": {
-          "[X2=True]": {
-            "True": [
-              0.0,
-              0.0
-            ],
-            "False": [
-              1.0,
-              1.0
-            ]
-          },
-          "[X2=False]": {
-            "True": [
-              0.82,
+              0.65,
               0.88
             ],
             "False": [
               0.12,
-              0.18
+              0.35
+            ]
+          },
+          "[X1=False]": {
+            "True": [
+              0.35,
+              0.53
+            ],
+            "False": [
+              0.47,
+              0.65
+            ]
+          }
+        },
+        "X3": {
+          "[X1=True]": {
+            "True": [
+              0.51,
+              0.71
+            ],
+            "False": [
+              0.29,
+              0.49
+            ]
+          },
+          "[X1=False]": {
+            "True": [
+              0.63,
+              0.8
+            ],
+            "False": [
+              0.2,
+              0.37
             ]
           }
         },
         "X4": {
-          "[X2=True]": {
+          "[X3=True]": {
             "True": [
               0.0,
               0.0
@@ -108,36 +108,36 @@
               1.0
             ]
           },
-          "[X2=False]": {
+          "[X3=False]": {
             "True": [
-              0.79,
-              0.93
+              0.87,
+              1.0
             ],
             "False": [
-              0.07,
-              0.21
+              0.0,
+              0.13
             ]
           }
         },
         "X5": {
-          "[X4=True]": {
+          "[X1=True]": {
             "True": [
-              0.24,
-              0.47
+              0.0,
+              0.24
             ],
             "False": [
-              0.53,
-              0.76
+              0.76,
+              1.0
             ]
           },
-          "[X4=False]": {
+          "[X1=False]": {
             "True": [
-              0.63,
-              0.84
+              0.0,
+              0.0
             ],
             "False": [
-              0.16,
-              0.37
+              1.0,
+              1.0
             ]
           }
         }
@@ -145,7 +145,7 @@
       "logical_constraints": [
         {
           "if": {
-            "X2": true
+            "X3": true
           },
           "then": {
             "X4": false
@@ -153,10 +153,10 @@
         },
         {
           "if": {
-            "X2": true
+            "X1": false
           },
           "then": {
-            "X3": false
+            "X5": false
           }
         }
       ]
@@ -168,8 +168,8 @@
           "X1",
           "X2",
           "X3",
-          "X4",
-          "X5"
+          "X5",
+          "X4"
         ],
         "edges": [
           [
@@ -177,25 +177,25 @@
             "X2"
           ],
           [
-            "X2",
+            "X1",
             "X3"
           ],
           [
-            "X2",
-            "X4"
+            "X1",
+            "X5"
           ],
           [
-            "X4",
-            "X5"
+            "X3",
+            "X4"
           ]
         ]
       },
       "sampled_states": {
         "X1": false,
-        "X2": false,
+        "X2": true,
         "X3": true,
-        "X4": true,
-        "X5": true
+        "X5": false,
+        "X4": false
       },
       "forward_samples": {
         "type": "DataFrame",
@@ -207,32 +207,27 @@
           "X1",
           "X2",
           "X3",
-          "X4",
-          "X5"
+          "X5",
+          "X4"
         ]
       }
     },
     "baseline_structure_learning": {
       "learned_bn": {
         "hillclimb_edges": {},
-        "hillclimb_bic": -732.2993784649174
+        "hillclimb_bic": -619.0170876645262
       },
       "shd": {
         "hillclimb_shd": {
-          "shd": 3,
+          "shd": 1,
           "missing": [
             [
               "X1",
-              "X2"
+              "X3"
             ]
           ],
-          "extra": [
-            [
-              "X2",
-              "X1"
-            ]
-          ],
-          "orientation_errors": 1
+          "extra": [],
+          "orientation_errors": 0
         }
       }
     },
@@ -240,19 +235,19 @@
       "interval_bic_results": {
         "low": {
           "edges": {},
-          "score": 2512.7489664062764
+          "score": 2550.0897947492504
         },
         "mid": {
           "edges": {},
-          "score": 2495.267961245451
+          "score": 2543.7968854838555
         },
         "high": {
           "edges": {},
-          "score": 2477.7869560846248
+          "score": 2537.5039762184606
         },
         "network_interval": [
-          2512.7489664062764,
-          2477.7869560846248
+          2550.0897947492504,
+          2537.5039762184606
         ]
       },
       "interval_lcn_shd": {
@@ -277,8 +272,8 @@
       }
     },
     "kl_divergence": {
-      "baseline_vs_learned_bn": -0.002399050113592709,
-      "baseline_vs_lcn_learned_bn": -0.0023990501135927435
+      "baseline_vs_learned_bn": -0.006543385259356556,
+      "baseline_vs_lcn_learned_bn": -0.007650590484335537
     },
     "intermediate": {
       "lcn_aggregate_table": {
@@ -314,28 +309,24 @@
       "learned_bn_model": {
         "type": "DiscreteBayesianNetwork",
         "nodes": [
-          "X2",
-          "X4",
-          "X3",
           "X1",
-          "X5"
+          "X2",
+          "X5",
+          "X3",
+          "X4"
         ],
         "edges": [
           [
-            "X2",
-            "X4"
+            "X1",
+            "X2"
           ],
           [
-            "X2",
-            "X3"
-          ],
-          [
-            "X2",
-            "X1"
-          ],
-          [
-            "X4",
+            "X1",
             "X5"
+          ],
+          [
+            "X3",
+            "X4"
           ]
         ]
       },
@@ -344,9 +335,9 @@
         "nodes": [
           "X1",
           "X2",
-          "X4",
+          "X5",
           "X3",
-          "X5"
+          "X4"
         ],
         "edges": [
           [
@@ -354,16 +345,16 @@
             "X2"
           ],
           [
-            "X2",
-            "X4"
+            "X1",
+            "X5"
           ],
           [
-            "X2",
+            "X1",
             "X3"
           ],
           [
-            "X4",
-            "X5"
+            "X3",
+            "X4"
           ]
         ]
       }
