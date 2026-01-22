@@ -3,3 +3,6 @@ code_env/
 # Ignore all __pycache__ directories
 __pycache__/
 **/__pycache__/
+
+# Ignore results
+results
