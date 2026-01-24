@@ -1,3 +1,4 @@
+import itertools
 from lcn_functions.model import create_lcn
 from metric_functions.kl_divergence import kl_divergence_from_samples
 from metric_functions.structural_hamming_distance import structural_hamming_distance_compare
@@ -9,6 +10,8 @@ from structure_learning.hill_climbing import run_hillclimbing_bic, run_interval_
 from structure_learning.sim_anneal import run_simanneal_sa
 from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.estimators import MaximumLikelihoodEstimator
+
+from utils.data_saving import save_experiment_to_json
 
 
 """
@@ -348,3 +351,81 @@ def experiment_run_controller():
     }
 
     return experiment_obj
+
+
+
+def experiment_run_variants():
+    """
+    Runs a series of experiment runs with varying parameters.
+
+    Variations:
+    - LCN size: 5–10
+    - Interval Width: 0.2
+    - Width distribution: "beta", "gaussian", "uniform", "triangular"
+    - In-degree: 1–3
+    - Number of samples: 100–500
+    - Repeats: 10 runs per configuration
+    """
+
+    # Parameter grids
+    sizes = range(5, 11)
+    interval_widths = [0.2]
+    width_dist_types = ["beta", "gaussian", "uniform", "triangular"]
+    in_degrees = range(1, 4)
+    num_samples_list = [100, 200, 300, 400, 500]
+
+    runs_per_config = 10
+
+    all_experiments = []
+    run_counter = 1
+
+    # Cartesian product of all parameter variants
+    for (size,
+         interval_width,
+         width_dist_type,
+         in_degree,
+         num_samples) in itertools.product(
+            sizes,
+            interval_widths,
+            width_dist_types,
+            in_degrees,
+            num_samples_list
+        ):
+
+        for repeat_idx in range(runs_per_config):
+
+            print(
+                f"Running experiment {run_counter} | "
+                f"size={size}, width={interval_width}, "
+                f"dist={width_dist_type}, in_degree={in_degree}, "
+                f"samples={num_samples}, repeat={repeat_idx + 1}"
+            )
+
+            results = run_workflow_config(
+                size,
+                interval_width,
+                width_dist_type,
+                in_degree,
+                num_samples
+            )
+
+            experiment_obj = {
+                "run_id": f"run_{run_counter}",
+                "repeat": repeat_idx + 1,
+                "params": {
+                    "size": size,
+                    "interval_width": interval_width,
+                    "width_dist_type": width_dist_type,
+                    "in_degree": in_degree,
+                    "num_samples": num_samples,
+                },
+                "results": results
+            }
+            
+            # Save to results folder
+            save_experiment_to_json(experiment_obj, f"run_{run_counter}")
+
+            # all_experiments.append(experiment_obj)
+            run_counter += 1
+
+    # return all_experiments
