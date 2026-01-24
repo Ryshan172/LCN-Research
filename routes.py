@@ -238,6 +238,20 @@ def run_all_experiments():
         # Run all experiments
         experiment_run_variants()
 
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error running experiments: {e}"
+        )
+
+
+@router.post("/summarise-results")
+def summarise_experiment_results():
+    try:
 
         # Summarising results of all experiments in results
         df = summarise_experiments_to_csv(
