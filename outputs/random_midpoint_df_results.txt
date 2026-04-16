@@ -1,8 +1,0 @@
-Structure Learning Method: Hill Climbing
-Learned Edges:
-  A -> C
-  C -> B
-Structure Learning Method: Simulated Annealing
-Learned Edges:
-  C -> A
-  C -> B
