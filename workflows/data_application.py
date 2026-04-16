@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from pgmpy.estimators import HillClimbSearch, BIC
+import json
 
 """
 Workflow for application of RQ1 flow to MIMIC-IV Dataset
@@ -257,7 +258,11 @@ def build_lcn_from_data():
         "logical_constraints": logical_constraints
     }
 
-    print(lcn)
+    # Export to json
+    with open("med_lcn.json", "w") as f:
+        json.dump(lcn, f, indent=2)
+
+    print("LCN saved to med_lcn.json")
 
 
 build_lcn_from_data()
