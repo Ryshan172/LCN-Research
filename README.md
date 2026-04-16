@@ -1,95 +1,42 @@
-# Setup
-- Activate virtual environment 
-- pip install -r requirements.txt
+# Logical Credal Network Structure Learning 
 
-## Virtual environment
+A repository for generating Logical Credal Networks (LCNs) and performing structure
+learning experiments 
+
+## Setup
+
+Create and activate virtual environment 
+
+```
 python -m venv code_env
 
 source code_env/bin/activate
+```
+
+Install required packages in environment
+
+```
+pip install -r requirements.txt
+```
+
 
 ## Run API
+
+All functionality such as generating LCNs and running experiments can
+be done via an API
+
+```
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+The API will be accessible locally at `http://localhost:8000/docs#/` 
 
 
-## LCN Structures
-- Using JSON e.g. net1.json
-- programmatic representation for:
-    - DAG structure
-    - Conditional Credal Sets (interval-valued CPTs)
-    - Logical constraints (e.g., if A=True then B=False)
-- JSON schema for each network instance 
+## Run Experiments 
 
-JSON supports:
-- DAG structure
-- Conditional credal sets
-- Logical constraints
+The endpoint `/run-all-experiments` can be used to run all experiments as shown in `workflows/rq1_experiments.py` 
 
+Once all experiments have run, a csv file of the results can be created using 
+the `/summarise-results` endpoint
 
-# LCN Datasets
-
-## Sampling From The Network
-Because probabilities are intervals, trying different sampling strategies:
-- Midpoint of intervals
-- Random value within interval
-- Lower bound or upper bound
-
-Each sample is generated topologically:
-- Sample root node using interval strategy
-- Recursively sample child nodes conditioned on parent value(s)
-
-### Implementation Ideas
-Topological sort of the DAG
-
-For each node:
-- Select probability from interval using a strategy
-- Sample a value using that probability
-
-Check if any logical constraint is violated → reject and resample if necessary (rejection sampling)
-
-Store the final dataset as a CSV with each row being one sample.\
-
-
-# Useful Links
-https://github.com/IBM/LCN
-
-
-
-# LCN Structures
-
-## Net1
-
-This Logical Credal Network (LCN) models three binary variables: A, B, and C. The relationships are as follows:
-
-A is a root node with uncertainty represented by an interval-valued prior:
-- P(A=True) ∈ [0.4, 0.6]
-- P(A=False) ∈ [0.4, 0.6]
-
-B is conditionally dependent on A:
-
-If A=True:
-
-- P(B=True) ∈ [0.3, 0.7]
-- P(B=False) ∈ [0.3, 0.7]
-
-If A=False:
-
-- P(B=True) ∈ [0.6, 0.9]
-- P(B=False) ∈ [0.1, 0.4]
-
-C is conditionally dependent on B:
-
-If B=True:
-
-- P(C=True) ∈ [0.7, 0.9]
-- P(C=False) ∈ [0.1, 0.3]
-
-If B=False:
-
-- P(C=True) ∈ [0.2, 0.4]
-- P(C=False) ∈ [0.6, 0.8]
-
-In addition to probabilistic uncertainty, the network encodes a logical constraint:
-
-If A is true, then B must be false.
-
-This logical rule overrides or filters out probabilistic configurations that would otherwise violate the implication, effectively restricting the set of admissible joint distributions.
+The rest of the endpoints are mainly from earlier stages of the experiments and research and are not necessary to replicate results
