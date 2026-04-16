@@ -369,12 +369,14 @@ def experiment_run_variants():
 
     # Parameter grids
     sizes = range(5, 11)
-    interval_widths = [0.2]
+    interval_widths = [0.2, 0.3, 0.4]
     width_dist_types = ["beta", "gaussian", "uniform", "triangular"]
     in_degrees = range(1, 4)
-    num_samples_list = [100, 200, 300, 400, 500]
+    num_samples_list = [100, 200, 300, 400]
 
-    runs_per_config = 10
+    # TODO: Change interval widths
+
+    runs_per_config = 1
 
     all_experiments = []
     run_counter = 1
@@ -410,7 +412,7 @@ def experiment_run_variants():
             )
 
             experiment_obj = {
-                "run_id": f"run_{run_counter}",
+                "run_id": run_counter,
                 "repeat": repeat_idx + 1,
                 "params": {
                     "size": size,

@@ -21,6 +21,10 @@ def summarise_experiment_json(json_path):
     results = data["results"]
 
     summary = {
+        # ---- run metadata ----
+        "run_id": data.get("run_id"),
+        "repeat": data.get("repeat"),
+
         # ---- parameters ----
         "size": params["size"],
         "interval_width": params["interval_width"],
