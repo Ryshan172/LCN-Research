@@ -327,8 +327,8 @@ def run_medical_experiments(csv_path, n_lcns=100, num_samples=300):
         save_application_to_json(experiment_obj, f"medical_run_{i+1}")
 
 
-run_medical_experiments(
-    csv_path="medical_data.csv",
-    n_lcns=100,
-    num_samples=300
-)
+# run_medical_experiments(
+#     csv_path="medical_data.csv",
+#     n_lcns=10,
+#     num_samples=300
+# )

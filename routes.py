@@ -14,6 +14,7 @@ from learn_structure import learn_structure_lcn_samples
 from pgmpy.estimators import BIC as BicScore
 from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 
+from workflows.med_data_workflow import run_medical_experiments
 from workflows.rq1_experiments import experiment_run_controller, experiment_run_variants
 
 router = APIRouter()
@@ -257,6 +258,27 @@ def summarise_experiment_results():
         df = summarise_experiments_to_csv(
             input_dir="results",
             output_csv="experiment_summary.csv"
+        )
+
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error running experiments: {e}"
+        )
+    
+
+@router.post("/run-medical-application")
+def run_all_experiments():
+    try:
+        # Run all experiments
+        run_medical_experiments(
+            csv_path="medical_data.csv",
+            n_lcns=1,
+            num_samples=300
         )
 
         return {
