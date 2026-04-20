@@ -420,85 +420,111 @@ def ensure_no_isolated_nodes(nodes, edges):
     return edges
 
 
-def generate_lcns_from_data(csv_path, n_lcns=100):
+def get_variable_node_set(df, min_nodes=4, max_nodes=None, seed=None):
     """
-    Generate a series of LCNs with:
-    - Topological ordering
-    - No isolated nodes
-    - Full coverage of credal sets 
+    Randomly selects a subset of X1..Xn columns to define LCN size dynamically.
+    """
+
+    if seed is not None:
+        np.random.seed(seed)
+
+    cols = list(df.columns)
+
+    if max_nodes is None:
+        max_nodes = len(cols)
+
+    k = np.random.randint(min_nodes, max_nodes + 1)
+    k = min(k, len(cols))
+
+    selected = np.random.choice(cols, size=k, replace=False).tolist()
+
+    return sorted(selected)
+
+
+def generate_lcns_from_data(
+    csv_path,
+    n_lcns=100,
+    min_size=4,
+    max_size=None,
+    max_edges_per_node=2
+):
+    """
+    Generate LCNs of varying sizes with consistent structure + credal sets.
     """
 
     df_anonymised = load_derived_dataset(csv_path)
-
-    assert all(col.startswith("X") for col in df_anonymised.columns)
-
-    base_nodes = list(df_anonymised.columns)
-
-    feature_map = {f"X{i+1}": f"feature_{i+1}" for i in range(len(base_nodes))}
-
-    df_fixed = df_anonymised.reindex(columns=base_nodes, fill_value=False)
-
-    nodes_tmp, global_edges = learn_structure(df_fixed)
-
-    global_constraints = extract_logical_constraints(
-        df_fixed,
-        nodes_tmp,
-        global_edges
-    )
 
     lcns = []
 
     for _ in range(n_lcns):
 
+        # bootstrap sample
         df_boot = df_anonymised.sample(frac=0.7, replace=True)
-        df_boot = enforce_schema(df_boot, base_nodes)
 
-        # Learn structure
+        # =========================
+        # VARIABLE LCN SIZE HERE
+        # =========================
+        nodes = get_variable_node_set(
+            df_boot,
+            min_nodes=min_size,
+            max_nodes=max_size or len(df_boot.columns),
+        )
+
+        df_boot = df_boot[nodes]
+        df_boot = enforce_schema(df_boot, nodes)
+
+        # learn structure on variable node set
         _, learned_edges = learn_structure(df_boot)
 
+        # clean edges
         edges = [
             (p, c)
             for p, c in learned_edges
-            if p in base_nodes and c in base_nodes and p != c
+            if p in nodes and c in nodes and p != c
         ]
 
-        edges = sorted(edges)[:4]
+        edges = sorted(edges)
 
+        # soft cap instead of fixed 4
+        if max_edges_per_node is not None:
+            edges = edges[: len(nodes) * max_edges_per_node]
+
+        # fallback if empty
         if len(edges) == 0:
             _, fallback_edges = learn_structure(df_boot)
             edges = [
                 (p, c)
                 for p, c in fallback_edges
-                if p in base_nodes and c in base_nodes and p != c
-            ][:4]
+                if p in nodes and c in nodes and p != c
+            ]
 
-        # Ensure NO isolated nodes (important)
+        # =========================
+        # ensure connectivity
+        # =========================
         connected = set()
         for p, c in edges:
             connected.add(p)
             connected.add(c)
 
-        for n in base_nodes:
+        for n in nodes:
             if n not in connected:
-                # attach deterministically (no randomness = reproducible)
-                target = next(x for x in base_nodes if x != n)
+                target = next(x for x in nodes if x != n)
                 edges.append((n, target))
 
-        # Ensure topological ordering because of topological sampling
-        nodes = topological_sort(base_nodes, edges)
+        # topological ordering
+        nodes = topological_sort(nodes, edges)
 
-        # Parent map (must match sampler + BN builder)
+        # parent map
         parent_map = {n: [] for n in nodes}
-
         for p, c in edges:
             parent_map[c].append(p)
 
         for n in nodes:
-            # These must match at all workflow levels
             parent_map[n] = sorted(parent_map[n])
 
-
-        # Credal sets
+        # =========================
+        # credal sets (still uniform placeholder)
+        # =========================
         credal_sets = {}
 
         for node in nodes:
@@ -522,13 +548,11 @@ def generate_lcns_from_data(csv_path, n_lcns=100):
                         "False": [0.5, 0.5]
                     }
 
-
         lcns.append({
-            "nodes": nodes, 
+            "nodes": nodes,
             "edges": edges,
             "credal_sets": credal_sets,
-            "logical_constraints": global_constraints,
-            "feature_map": feature_map
+            "logical_constraints": []
         })
 
     return lcns
@@ -539,30 +563,19 @@ def run_workflow_on_given_lcn(lcn, num_samples):
 
     model, sampled_states = build_precise_bn_from_lcn(lcn)
 
-    print("Reaches")
-    print("model:")
-    print(model)
-
-    print("sampled_states:")
-    print(sampled_states)
-
-    # IMPORTANT FIX: enforce schema BEFORE sampling pipeline dependency
     expected_nodes = lcn["nodes"]
 
-    lcn = {
-        **lcn,
-        "nodes": expected_nodes
-    }
+    if len(expected_nodes) == 0:
+        raise ValueError("LCN has no nodes")
 
+    # sample from LCN
     lcn_aggregate_table, lcn_samples_df = contingency_sample_lcn(lcn, num_samples)
 
-    print("Reaches 2")
-
-    # HARD schema enforcement (keep, but now safe)
+    # enforce schema safety
     lcn_samples_df = enforce_schema(lcn_samples_df, expected_nodes)
-
     lcn_samples_df = lcn_samples_df[expected_nodes].astype(bool)
 
+    # baseline BN sampling
     bn_forward_samples = ancestral_sample_bn(model, n_samples=num_samples)
 
     learned_bn = structure_learn_baseline_bn(bn_forward_samples)
