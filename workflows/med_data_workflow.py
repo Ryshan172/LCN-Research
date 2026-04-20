@@ -15,7 +15,7 @@ from sampler_functions.contingency_sampler import credal_aggregate_intervals, sa
 from structure_learning.hill_climbing import run_hillclimbing_bic, run_interval_bic_hillclimb
 from scoring_functions.interval_bic_derivation import compute_interval_BIC, compute_network_interval_BIC
 from utils.data_saving import save_application_to_json, save_experiment_to_json
-from workflows.rq1_experiments import contingency_sample_lcn, interval_bic_structure_learn, run_interval_lcn_shd, run_structural_hamming_distance, structure_learn_baseline_bn
+from workflows.rq1_experiments import build_bn_from_lcn_learned, contingency_sample_lcn, interval_bic_structure_learn, run_interval_lcn_shd, run_structural_hamming_distance, structure_learn_baseline_bn
 
 
 """
@@ -568,26 +568,62 @@ def run_workflow_on_given_lcn(lcn, num_samples):
     if len(expected_nodes) == 0:
         raise ValueError("LCN has no nodes")
 
-    # sample from LCN
+    # Sample from LCN
     lcn_aggregate_table, lcn_samples_df = contingency_sample_lcn(lcn, num_samples)
 
-    # enforce schema safety
     lcn_samples_df = enforce_schema(lcn_samples_df, expected_nodes)
     lcn_samples_df = lcn_samples_df[expected_nodes].astype(bool)
 
-    # baseline BN sampling
+    # Baseline BN sampling
     bn_forward_samples = ancestral_sample_bn(model, n_samples=num_samples)
 
+    # Learn baseline BN structure
     learned_bn = structure_learn_baseline_bn(bn_forward_samples)
 
+    # Build learned BN model (for KL)
+    edges = list(learned_bn["hillclimb_edges"])
+
+    learned_bn_model = DiscreteBayesianNetwork(edges)
+    learned_bn_model.add_nodes_from(model.nodes())
+    learned_bn_model.fit(bn_forward_samples)
+
+
+    # SHD (baseline structure)
     baseline_shd_results = run_structural_hamming_distance(model, learned_bn)
 
+
+    # Interval BIC learning
     interval_bic_results = interval_bic_structure_learn(
         lcn_aggregate_table,
         lcn_samples_df
     )
 
-    interval_lcn_shd_results = run_interval_lcn_shd(model, interval_bic_results)
+    interval_lcn_shd_results = run_interval_lcn_shd(
+        model,
+        interval_bic_results
+    )
+
+    # Build LCN-learned BN model (mid)
+    lcn_learned_bn = build_bn_from_lcn_learned(
+        interval_bic_results,
+        model,
+        bn_forward_samples
+    )
+
+
+    # KL: Baseline BN vs Learned BN
+    kl_baseline_vs_learned = kl_divergence_from_samples(
+        true_model=model,
+        approx_model=learned_bn_model,
+        samples_df=bn_forward_samples
+    )
+
+    # KL: Baseline BN vs LCN-learned BN
+    kl_baseline_vs_lcn = kl_divergence_from_samples(
+        true_model=model,
+        approx_model=lcn_learned_bn,
+        samples_df=bn_forward_samples
+    )
 
     return {
         "lcn": lcn,
@@ -603,9 +639,16 @@ def run_workflow_on_given_lcn(lcn, num_samples):
         "interval_bic_learning": {
             "interval_bic_results": interval_bic_results,
             "interval_lcn_shd": interval_lcn_shd_results,
-        }
-    }
+        },
+        "kl_divergence": {
+            "baseline_vs_learned_bn": kl_baseline_vs_learned,
+            "baseline_vs_lcn_learned_bn": kl_baseline_vs_lcn
+        },
 
+        # Keep models for debugging / analysis
+        "learned_bn_model": learned_bn_model,
+        "lcn_learned_bn_model": lcn_learned_bn
+    }
 
 def run_medical_experiments(csv_path, n_lcns=100, num_samples=300):
     """
