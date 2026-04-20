@@ -277,7 +277,7 @@ def run_all_experiments():
         # Run all experiments
         run_medical_experiments(
             csv_path="medical_data.csv",
-            n_lcns=1,
+            n_lcns=100,
             num_samples=300
         )
 

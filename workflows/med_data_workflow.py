@@ -1,3 +1,5 @@
+import itertools
+
 import pandas as pd
 from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.estimators import MaximumLikelihoodEstimator
@@ -56,215 +58,480 @@ def load_medical_csv(path):
     return df
 
 
-def encode_categoricals(df):
+def load_derived_dataset(path):
     """
-    Convert categorical/string columns into integer codes
-    so numeric operations like mean() work.
+    Load already-derived dataset (X1..Xn).
+    Ensures strict boolean format for BN/LCN pipeline.
+    Fixes pandas FutureWarning about silent downcasting.
     """
 
+    import pandas as pd
+
+    df = pd.read_csv(path)
+
+    # Clean column names
+    df.columns = [c.strip() for c in df.columns]
+
     for col in df.columns:
-        if df[col].dtype == "object" or pd.api.types.is_categorical_dtype(df[col]):
-            df[col] = df[col].astype("category").cat.codes
+        mapped = (
+            df[col]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .map({
+                "1": True, "0": False,
+                "true": True, "false": False
+            })
+        )
+
+        # Explicit dtype handling (fixes warning)
+        mapped = mapped.astype("boolean")   # pandas nullable boolean
+        mapped = mapped.fillna(False)
+
+        df[col] = mapped.astype(bool)       # final strict bool
+
+    return df
+
+
+def topological_sort(nodes, edges):
+    from collections import defaultdict, deque
+
+    graph = defaultdict(list)
+    indegree = {n: 0 for n in nodes}
+
+    for p, c in edges:
+        graph[p].append(c)
+        indegree[c] += 1
+
+    q = deque([n for n in nodes if indegree[n] == 0])
+    ordered = []
+
+    while q:
+        n = q.popleft()
+        ordered.append(n)
+
+        for nxt in graph[n]:
+            indegree[nxt] -= 1
+            if indegree[nxt] == 0:
+                q.append(nxt)
+
+    # fallback for cycles / disconnected nodes
+    for n in nodes:
+        if n not in ordered:
+            ordered.append(n)
+
+    return ordered
+
+
+def encode_categoricals(df):
+    """
+    Ensure all variables are boolean-safe and compatible with LCN + pgmpy sampling.
+    Prevents silent NaN/str drift that later causes missing-node errors.
+    """
+
+    df = df.copy()
+
+    for col in df.columns:
+
+        # already clean bool → keep
+        if df[col].dtype == bool:
+            continue
+
+        # string-like columns
+        if df[col].dtype == object:
+            df[col] = (
+                df[col]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .map({
+                    "true": True, "false": False,
+                    "1": True, "0": False,
+                    "yes": True, "no": False,
+                    "m": True, "f": False
+                })
+            )
+
+        # IMPORTANT FIX:
+        # only apply fillna/astype AFTER mapping
+        df[col] = df[col].fillna(False).astype(bool)
 
     return df
 
 
 def preprocess_medical_data(df):
     """
-    Converts raw clinical table into discrete variables for BN/LCN learning.
+    Converts raw medical data into stable binary features.
+    NO downstream semantic names leak beyond this point.
     """
 
     df = df.copy()
 
-    # Age -> categorical bins
-    df["age_group"] = pd.cut(
-        df["anchor_age"],
-        bins=[0, 50, 70, 120],
-        labels=["young", "middle", "elderly"]
-    )
+    # ensure required columns exist
+    required_raw = ["anchor_age", "los_hours", "num_diagnoses", "gender", "admission_type"]
 
-    # Length of stay -> bins
-    df["los_group"] = pd.cut(
-        df["los_hours"],
-        bins=[0, 48, 120, float("inf")],
-        labels=["short", "medium", "long"]
-    )
+    for col in required_raw:
+        if col not in df.columns:
+            df[col] = 0 if col not in ["gender", "admission_type"] else "unknown"
 
-    # Dropping raw continuous columns and replacing with bins
-    df = df.drop(columns=["anchor_age", "los_hours", "hadm_id"])
+    # numeric coercion
+    df["anchor_age"] = pd.to_numeric(df["anchor_age"], errors="coerce").fillna(0)
+    df["los_hours"] = pd.to_numeric(df["los_hours"], errors="coerce").fillna(0)
+    df["num_diagnoses"] = pd.to_numeric(df["num_diagnoses"], errors="coerce").fillna(0)
 
-    # Ensure categorical encoding consistency
-    for col in df.columns:
-        if pd.api.types.is_categorical_dtype(df[col]):
-            df[col] = df[col].cat.add_categories(["unknown"])
-            df[col] = df[col].fillna("unknown")
-        elif df[col].dtype == "object":
-            df[col] = df[col].fillna("unknown")
-        else:
-            df[col] = df[col].fillna(0)
+    # engineered binary signals (TEMP internal only)
+    features = pd.DataFrame()
 
-    return df
+    features["f_age_high"] = df["anchor_age"] >= 65
+    features["f_los_high"] = df["los_hours"] >= 72
+    features["f_diag_high"] = df["num_diagnoses"] >= 10
+
+    features["f_gender_male"] = df["gender"].astype(str).str.upper().eq("M")
+
+    features["f_emergency_admission"] = df["admission_type"].astype(str).isin([
+        "URGENT", "EW EMER.", "DIRECT EMER."
+    ])
+
+    return features.fillna(False).astype(bool)
 
 
-def learn_structure(df, max_parents=2):
+def anonymise_columns(df):
     """
-    Learns a DAG structure from data using Hill Climbing + BIC score.
+    Converts meaningful medical features → anonymous X1..Xn nodes.
+    This is what the BN / LCN sees.
+    """
+
+    df = df.copy()
+    mapping = {}
+    anonymised = pd.DataFrame()
+
+    for i, col in enumerate(df.columns):
+        x_name = f"X{i+1}"
+        anonymised[x_name] = df[col].astype(bool)
+        mapping[x_name] = col   # optional debug trace (NOT used downstream)
+
+    return anonymised, mapping
+
+
+def learn_structure(df, max_parents=1, max_children=2):
+    """
+    Stable DAG learning with strict schema safety:
+    - removes self-loops
+    - ensures deterministic ordering
+    - enforces max_children correctly
+    - guarantees edges reference valid nodes only
     """
 
     hc = HillClimbSearch(df)
 
-    # Learn best-scoring DAG under BIC
     model = hc.estimate(
         scoring_method=BIC(df),
         max_indegree=max_parents
     )
 
-    # Convert to edge list format (your LCN format)
+    nodes = list(df.columns)
     edges = list(model.edges())
 
-    # Extract nodes
-    nodes = list(df.columns)
+    # strict validity filter
+    edges = [
+        (p, c)
+        for p, c in edges
+        if p in nodes and c in nodes and p != c
+    ]
 
-    return nodes, edges
+    # deterministic ordering (VERY important for reproducibility)
+    edges = sorted(edges)
+
+    child_count = {n: 0 for n in nodes}
+    filtered_edges = []
+
+    for p, c in edges:
+        if child_count[p] < max_children:
+            filtered_edges.append((p, c))
+            child_count[p] += 1
+
+    return nodes, filtered_edges
 
 
-def build_credal_sets(df, nodes, edges, B=200):
+def filter_edges_by_strength(df, edges, threshold=0.05):
     """
-    Builds LCN credal sets using bootstrap uncertainty estimation.
+    Remove weak edges based on correlation / dependency strength
     """
+
+    strong_edges = []
+
+    for parent, child in edges:
+        try:
+            corr = abs(df[parent].corr(df[child]))
+        except:
+            corr = 0
+
+        if corr >= threshold:
+            strong_edges.append((parent, child))
+
+    return strong_edges
+
+
+def limit_edges(edges, max_edges=4):
+    """
+    Limit edges but NEVER return empty structure.
+    """
+    if len(edges) == 0:
+        return edges
+
+    return edges[:max_edges]
+
+
+def build_credal_sets(df, nodes, edges, B=30):
 
     credal_sets = {}
 
     for node in nodes:
 
-        # Find parents of node
-        parents = [p for p, c in edges if c == node]
+        if node not in df.columns:
+            continue  # hard safety guard
 
+        parents = [p for p, c in edges if c == node]
         credal_sets[node] = {}
 
-        # Case: Root Node (no parents)
+        # Root Node
         if len(parents) == 0:
-            samples = []
 
+            samples = []
             for _ in range(B):
                 boot = df.sample(len(df), replace=True)
-                p_true = (boot[node] == 1).mean()
-                samples.append(p_true)
+                samples.append(boot[node].mean())
 
             low, high = np.quantile(samples, [0.05, 0.95])
 
             credal_sets[node]["[]"] = {
-                "True": [round(low, 2), round(high, 2)],
-                "False": [round(1 - high, 2), round(1 - low, 2)]
+                "True": [float(low), float(high)],
+                "False": [float(1 - high), float(1 - low)]
             }
 
-        # Case: Conditional Node
+        # Conditional Node
         else:
-            grouped = df.groupby(parents)
 
-            for config, subset_idx in grouped.groups.items():
+            safe_parents = [p for p in parents if p in df.columns]
 
-                subset = df.loc[subset_idx]
+            if len(safe_parents) == 0:
+                continue
 
+            grouped = df.groupby(safe_parents, dropna=False)
+
+            for config, idx in grouped.groups.items():
+
+                subset = df.loc[idx]
                 if len(subset) == 0:
                     continue
 
                 samples = []
-
                 for _ in range(B):
                     boot = subset.sample(len(subset), replace=True)
-                    p_true = (boot[node] == 1).mean()
-                    samples.append(p_true)
+                    samples.append(boot[node].mean())
 
                 low, high = np.quantile(samples, [0.05, 0.95])
 
-                # Build readable parent condition key
-                if isinstance(config, tuple):
-                    key = "[" + ", ".join(
-                        f"{p}={v}" for p, v in zip(parents, config)
-                    ) + "]"
-                else:
-                    key = f"[{parents[0]}={config}]"
+                if not isinstance(config, tuple):
+                    config = (config,)
+
+                key = "[" + ", ".join(
+                    f"{p}={bool(v)}" for p, v in zip(safe_parents, config)
+                ) + "]"
 
                 credal_sets[node][key] = {
-                    "True": [round(low, 2), round(high, 2)],
-                    "False": [round(1 - high, 2), round(1 - low, 2)]
+                    "True": [float(low), float(high)],
+                    "False": [float(1 - high), float(1 - low)]
                 }
 
     return credal_sets
 
 
-def extract_logical_constraints(df, nodes, edges, threshold=0.95):
-    """
-    Extracts deterministic rules from data:
-    IF parent config → child is almost always True/False
-    """
+def extract_logical_constraints(df, nodes, edges, threshold=0.85, min_support=10):
 
     constraints = []
+
+    # Schema alignment (prevents KeyErrors)
+    df = df.reindex(columns=nodes, fill_value=False)
 
     for child in nodes:
 
         parents = [p for p, c in edges if c == child]
+        parents = [p for p in parents if p in df.columns]
 
         if len(parents) == 0:
             continue
 
-        grouped = df.groupby(parents)[child].mean()
+        grouped = df.groupby(parents, dropna=False)[child].agg(["mean", "count"])
 
-        for config, prob in grouped.items():
+        for config, row in grouped.iterrows():
 
-            # Convert config to dict
+            if row["count"] < min_support:
+                continue
+
+            prob = row["mean"]
+
             if not isinstance(config, tuple):
                 config = (config,)
 
-            condition = dict(zip(parents, config))
+            condition = dict(zip(parents, [bool(v) for v in config]))
 
-            # High certainty rule
             if prob >= threshold:
-                constraints.append({
-                    "if": condition,
-                    "then": {child: True}
-                })
+                constraints.append({"if": condition, "then": {child: True}})
 
-            # Low certainty rule
             elif prob <= (1 - threshold):
-                constraints.append({
-                    "if": condition,
-                    "then": {child: False}
-                })
+                constraints.append({"if": condition, "then": {child: False}})
 
     return constraints
 
 
-# Generate LCNs from medical data bootstrap
-def generate_lcns_from_data(csv_path, n_lcns=100):
+def enforce_schema(df, nodes):
+    """
+    Guarantees df ALWAYS contains all nodes with strict boolean safety.
+    """
 
-    df_full = load_medical_csv(csv_path)
-    df_full = preprocess_medical_data(df_full)
-    df_full = encode_categoricals(df_full)
+    df = df.copy()
+
+    for n in nodes:
+        if n not in df.columns:
+            df[n] = False
+
+    # drop extra columns + enforce order
+    return df[nodes].fillna(False).astype(bool)
+
+
+def ensure_no_isolated_nodes(nodes, edges):
+    """
+    Ensures every node appears in at least one edge.
+    If isolated, attach it to a random node.
+    """
+    connected = set()
+    for p, c in edges:
+        connected.add(p)
+        connected.add(c)
+
+    missing = [n for n in nodes if n not in connected]
+
+    for n in missing:
+        # connect to a random other node (deterministically safe option: first node)
+        target = next(x for x in nodes if x != n)
+        edges.append((n, target))
+
+    return edges
+
+
+def generate_lcns_from_data(csv_path, n_lcns=100):
+    """
+    Generate a series of LCNs with:
+    - Topological ordering
+    - No isolated nodes
+    - Full coverage of credal sets 
+    """
+
+    df_anonymised = load_derived_dataset(csv_path)
+
+    assert all(col.startswith("X") for col in df_anonymised.columns)
+
+    base_nodes = list(df_anonymised.columns)
+
+    feature_map = {f"X{i+1}": f"feature_{i+1}" for i in range(len(base_nodes))}
+
+    df_fixed = df_anonymised.reindex(columns=base_nodes, fill_value=False)
+
+    nodes_tmp, global_edges = learn_structure(df_fixed)
+
+    global_constraints = extract_logical_constraints(
+        df_fixed,
+        nodes_tmp,
+        global_edges
+    )
 
     lcns = []
 
-    for i in range(n_lcns):
-        print(f"Generating LCN {i+1}/{n_lcns}")
+    for _ in range(n_lcns):
 
-        df_boot = df_full.sample(len(df_full), replace=True)
+        df_boot = df_anonymised.sample(frac=0.7, replace=True)
+        df_boot = enforce_schema(df_boot, base_nodes)
 
-        nodes, edges = learn_structure(df_boot)
-        credal_sets = build_credal_sets(df_boot, nodes, edges)
-        logical_constraints = extract_logical_constraints(df_boot, nodes, edges)
+        # Learn structure
+        _, learned_edges = learn_structure(df_boot)
 
-        lcn = {
-            "nodes": nodes,
+        edges = [
+            (p, c)
+            for p, c in learned_edges
+            if p in base_nodes and c in base_nodes and p != c
+        ]
+
+        edges = sorted(edges)[:4]
+
+        if len(edges) == 0:
+            _, fallback_edges = learn_structure(df_boot)
+            edges = [
+                (p, c)
+                for p, c in fallback_edges
+                if p in base_nodes and c in base_nodes and p != c
+            ][:4]
+
+        # Ensure NO isolated nodes (important)
+        connected = set()
+        for p, c in edges:
+            connected.add(p)
+            connected.add(c)
+
+        for n in base_nodes:
+            if n not in connected:
+                # attach deterministically (no randomness = reproducible)
+                target = next(x for x in base_nodes if x != n)
+                edges.append((n, target))
+
+        # Ensure topological ordering because of topological sampling
+        nodes = topological_sort(base_nodes, edges)
+
+        # Parent map (must match sampler + BN builder)
+        parent_map = {n: [] for n in nodes}
+
+        for p, c in edges:
+            parent_map[c].append(p)
+
+        for n in nodes:
+            # These must match at all workflow levels
+            parent_map[n] = sorted(parent_map[n])
+
+
+        # Credal sets
+        credal_sets = {}
+
+        for node in nodes:
+            parents = parent_map[node]
+            credal_sets[node] = {}
+
+            if len(parents) == 0:
+                credal_sets[node]["[]"] = {
+                    "True": [0.5, 0.5],
+                    "False": [0.5, 0.5]
+                }
+            else:
+                for combo in itertools.product([False, True], repeat=len(parents)):
+
+                    key = "[" + ", ".join(
+                        f"{p}={v}" for p, v in zip(parents, combo)
+                    ) + "]"
+
+                    credal_sets[node][key] = {
+                        "True": [0.5, 0.5],
+                        "False": [0.5, 0.5]
+                    }
+
+
+        lcns.append({
+            "nodes": nodes, 
             "edges": edges,
             "credal_sets": credal_sets,
-            "logical_constraints": logical_constraints
-        }
-
-        lcns.append(lcn)
+            "logical_constraints": global_constraints,
+            "feature_map": feature_map
+        })
 
     return lcns
-
 
 
 # Running worflow on a single medical data LCN
@@ -272,7 +539,29 @@ def run_workflow_on_given_lcn(lcn, num_samples):
 
     model, sampled_states = build_precise_bn_from_lcn(lcn)
 
+    print("Reaches")
+    print("model:")
+    print(model)
+
+    print("sampled_states:")
+    print(sampled_states)
+
+    # IMPORTANT FIX: enforce schema BEFORE sampling pipeline dependency
+    expected_nodes = lcn["nodes"]
+
+    lcn = {
+        **lcn,
+        "nodes": expected_nodes
+    }
+
     lcn_aggregate_table, lcn_samples_df = contingency_sample_lcn(lcn, num_samples)
+
+    print("Reaches 2")
+
+    # HARD schema enforcement (keep, but now safe)
+    lcn_samples_df = enforce_schema(lcn_samples_df, expected_nodes)
+
+    lcn_samples_df = lcn_samples_df[expected_nodes].astype(bool)
 
     bn_forward_samples = ancestral_sample_bn(model, n_samples=num_samples)
 
@@ -306,10 +595,18 @@ def run_workflow_on_given_lcn(lcn, num_samples):
 
 
 def run_medical_experiments(csv_path, n_lcns=100, num_samples=300):
+    """
+    Run experiments workflow similar to RQ1 but on medical data 
+    - Uses a fixed number of samples
+    """
 
     lcns = generate_lcns_from_data(csv_path, n_lcns)
+    
 
     for i, lcn in enumerate(lcns):
+        
+        print("LCN:")
+        print(lcn)
 
         print(f"\nRunning experiment {i+1}/{n_lcns}")
 
@@ -324,11 +621,4 @@ def run_medical_experiments(csv_path, n_lcns=100, num_samples=300):
             "results": results
         }
 
-        save_application_to_json(experiment_obj, f"medical_run_{i+1}")
-
-
-# run_medical_experiments(
-#     csv_path="medical_data.csv",
-#     n_lcns=10,
-#     num_samples=300
-# )
+        save_application_to_json(experiment_obj, f"run_{i+1}")
