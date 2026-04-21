@@ -9,6 +9,7 @@ from sampler_functions.contingency_sampler import run_aggregate_sampler
 from scoring_functions.interval_bic_score import compute_interval_bic_score
 from utils.data_saving import save_experiment_to_json
 from utils.data_summaries import summarise_experiments_to_csv
+from utils.med_data_summary import summarise_med_experiments
 from utils.util_functions import save_json_data
 from learn_structure import learn_structure_lcn_samples
 from pgmpy.estimators import BIC as BicScore
@@ -279,6 +280,27 @@ def run_all_experiments():
             csv_path="medical_data.csv",
             n_lcns=10,
             num_samples=300
+        )
+
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error running experiments: {e}"
+        )
+    
+
+@router.post("/summarise-med-results")
+def summarise_experiment_results():
+    try:
+
+        # Summarising results of all experiments in results
+        df = summarise_med_experiments(
+            input_dir="results_med",
+            output_csv="med_app_summary.csv"
         )
 
         return {
