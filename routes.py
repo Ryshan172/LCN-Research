@@ -15,6 +15,7 @@ from learn_structure import learn_structure_lcn_samples
 from pgmpy.estimators import BIC as BicScore
 from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 
+from workflows.application_workflow import run_application_workflow
 from workflows.med_data_workflow import run_medical_experiments
 from workflows.rq1_experiments import experiment_run_controller, experiment_run_variants
 
@@ -273,14 +274,10 @@ def summarise_experiment_results():
     
 
 @router.post("/run-medical-application")
-def run_all_experiments():
+def run_med_data_experiments():
     try:
         # Run all experiments
-        run_medical_experiments(
-            csv_path="medical_data.csv",
-            n_lcns=10,
-            num_samples=300
-        )
+        run_application_workflow("medical_data.csv")
 
         return {
             "status": "success",
