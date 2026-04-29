@@ -273,6 +273,76 @@ def sync_credal_sets_with_structure(lcn):
     return lcn
 
 
+def estimate_credal_sets_from_data(df, lcn, eps_scale=0.15, min_eps=0.02):
+    """
+    Converts structure-defined CPT skeleton into data-driven credal intervals.
+
+    - Uses empirical conditional probabilities
+    - Builds interval uncertainty based on sample size
+    - Works after sync_credal_sets_with_structure()
+    """
+
+    nodes = lcn["nodes"]
+    edges = lcn["edges"]
+
+    parent_map = {n: [] for n in nodes}
+    for p, c in edges:
+        parent_map[c].append(p)
+
+    new_credal = {}
+
+    for node in nodes:
+        parents = sorted(parent_map[node])
+        new_credal[node] = {}
+
+        # ---------------- ROOT NODE ----------------
+        if len(parents) == 0:
+            p = df[node].mean()
+
+            # uncertainty based on variance + data size
+            eps = max(min_eps, eps_scale * np.std(df[node]))
+
+            new_credal[node]["[]"] = {
+                "True": [max(0.01, p - eps), min(0.99, p + eps)],
+                "False": [max(0.01, (1 - p) - eps), min(0.99, (1 - p) + eps)]
+            }
+            continue
+
+        # ---------------- CONDITIONAL NODES ----------------
+        for combo in itertools.product([False, True], repeat=len(parents)):
+
+            key = "[" + ", ".join(
+                f"{p}={'True' if v else 'False'}"
+                for p, v in zip(parents, combo)
+            ) + "]"
+
+            # build mask for rows matching parent configuration
+            mask = np.ones(len(df), dtype=bool)
+
+            for p, v in zip(parents, combo):
+                mask &= (df[p] == (1 if v else 0))
+
+            subset = df[mask]
+
+            # if no data, fall back to weak prior
+            if len(subset) == 0:
+                p = 0.5
+                eps = 0.2
+            else:
+                p = subset[node].mean()
+
+                # uncertainty shrinks with data size
+                eps = max(min_eps, eps_scale / np.sqrt(len(subset)))
+
+            new_credal[node][key] = {
+                "True": [max(0.01, p - eps), min(0.99, p + eps)],
+                "False": [max(0.01, (1 - p) - eps), min(0.99, (1 - p) + eps)]
+            }
+
+    lcn["credal_sets"] = new_credal
+    return lcn
+
+
 def optimize_lcn_bic(initial_lcn, df, max_iters=100, max_parents=2):
     """
     Greedy Hill Climbing using BIC with full LCN validation.
@@ -304,6 +374,9 @@ def optimize_lcn_bic(initial_lcn, df, max_iters=100, max_parents=2):
         }
 
         candidate_lcn = sync_credal_sets_with_structure(candidate_lcn)
+
+        # Recompute credal sets
+        candidate_lcn = estimate_credal_sets_from_data(df, candidate_lcn)
 
         # Step 2: FULL LCN VALIDATION
         if not validate_generated_lcn(candidate_lcn):
@@ -368,6 +441,9 @@ def optimize_lcn_ibic(initial_lcn, df, max_iters=100, max_parents=2):
 
         # 2. sync (CRITICAL: always normalize before anything else)
         candidate_lcn = sync_credal_sets_with_structure(candidate_lcn)
+
+        # Recompute credal sets
+        candidate_lcn = estimate_credal_sets_from_data(df, candidate_lcn)
 
         # 3. validate DAG + LCN structure
         if not validate_generated_lcn(candidate_lcn):
