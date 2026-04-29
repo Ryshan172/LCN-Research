@@ -23,101 +23,56 @@ def load_dataset(csv_path):
 
 
 def generate_basic_lcn(csv_path, corr_threshold=0.15, max_parents=2):
-    """
-    Creates a realistic initial LCN with controlled sparsity.
-
-    Key properties:
-    - weak data-driven structure (not learned)
-    - bounded parent count (prevents exponential credal growth)
-    - supports BIC / IBIC optimisation fairly
-    """
-
-    # Return this as well as the result for later use
     df = load_dataset(csv_path)
-
     nodes = list(df.columns)
 
     edges = []
-
-    # Track how many parents each node already has
-    # This prevents dense CPT explosion later
     parent_count = {n: 0 for n in nodes}
 
-    # Build weak structure using correlation
-    # This is ONLY a heuristic seed, not learning
     for i, a in enumerate(nodes):
         for b in nodes[i + 1:]:
-
             corr = np.corrcoef(df[a], df[b])[0, 1]
 
             if np.abs(corr) > corr_threshold:
-
-                # enforce max parents constraint (critical fix)
                 if parent_count[b] < max_parents:
                     edges.append((a, b))
                     parent_count[b] += 1
 
-    # Build parent map from edges
+    # parent map (not strictly used later, but kept consistent)
     parent_map = {n: [] for n in nodes}
-
     for p, c in edges:
         parent_map[c].append(p)
 
-    # Credal sets (uncertainty model)
     credal_sets = {}
 
     for node in nodes:
+        parents = sorted(parent_map[node])  # IMPORTANT FIX
 
-        parents = parent_map[node]
         credal_sets[node] = {}
 
-        # Root nodes: use empirical uncertainty
         if len(parents) == 0:
-
             p_true = df[node].mean()
             eps = 0.1
 
             credal_sets[node]["[]"] = {
-                "True": [
-                    max(0.01, p_true - eps),
-                    min(0.99, p_true + eps)
-                ],
-                "False": [
-                    max(0.01, (1 - p_true) - eps),
-                    min(0.99, (1 - p_true) + eps)
-                ]
+                "True": [max(0.01, p_true - eps), min(0.99, p_true + eps)],
+                "False": [max(0.01, (1 - p_true) - eps), min(0.99, (1 - p_true) + eps)]
             }
-
-        # Conditional nodes (kept simple at init stage)
         else:
-
-            # IMPORTANT DESIGN CHOICE:
-            # We do NOT fully expand CPTs at init to avoid combinatorial explosion.
-            #
-            # Instead:
-            # - keep placeholder credal sets
-            # - let optimisation refine structure first
             for combo in itertools.product([False, True], repeat=len(parents)):
-
-                key = "[" + ", ".join(
-                    f"{p}={v}" for p, v in zip(parents, combo)
-                ) + "]"
+                key = "[" + ", ".join(f"{p}={v}" for p, v in zip(parents, combo)) + "]"
 
                 credal_sets[node][key] = {
                     "True": [0.5, 0.5],
                     "False": [0.5, 0.5]
                 }
 
-    logical_constraints = []
-
-    lcn =  {
+    return {
         "nodes": nodes,
         "edges": edges,
         "credal_sets": credal_sets,
-        "logical_constraints": logical_constraints
-    }
-
-    return lcn, df
+        "logical_constraints": []
+    }, df
 
 
 # ----------------------- Step 2 Code ----------------------------
@@ -142,40 +97,72 @@ def compute_bic_score(df, edges):
         return score
     except Exception:
         return -np.inf
-    
 
-def mutate_edges(nodes, edges):
+def is_cyclic(nodes, edges):
     """
-    Generates a neighbouring graph via a single random mutation.
-
-    WHY THIS EXISTS:
-    - Hill Climbing requires exploring "nearby" graph structures
-    - Mutations define the search space:
-        * add edge
-        * remove edge
-        * reverse edge
+    Lightweight cycle check (DFS).
+    Returns True if cycle exists.
     """
 
+    graph = defaultdict(list)
+    for a, b in edges:
+        graph[a].append(b)
+
+    visited = set()
+    stack = set()
+
+    def dfs(node):
+        if node in stack:
+            return True
+        if node in visited:
+            return False
+
+        stack.add(node)
+
+        for nxt in graph[node]:
+            if dfs(nxt):
+                return True
+
+        stack.remove(node)
+        visited.add(node)
+        return False
+
+    return any(dfs(n) for n in nodes)
+
+
+def mutate_edges(nodes, edges, max_attempts=10):
     edges = copy.deepcopy(edges)
 
-    operation = random.choice(["add", "remove", "reverse"])
+    for _ in range(max_attempts):
+        operation = random.choice(["add", "remove", "reverse"])
+        candidate = copy.deepcopy(edges)
 
-    if operation == "add":
-        a, b = random.sample(nodes, 2)
-        new_edge = (a, b)
+        if operation == "add":
+            a, b = random.sample(nodes, 2)
 
-        if new_edge not in edges:
-            edges.append(new_edge)
+            if a == b:
+                continue
 
-    elif operation == "remove" and edges:
-        edges.pop(random.randint(0, len(edges) - 1))
+            if (a, b) in candidate:
+                continue
 
-    elif operation == "reverse" and edges:
-        i = random.randint(0, len(edges) - 1)
-        a, b = edges[i]
-        edges[i] = (b, a)
+            candidate.append((a, b))
+
+        elif operation == "remove" and candidate:
+            candidate.pop(random.randint(0, len(candidate) - 1))
+
+        elif operation == "reverse" and candidate:
+            i = random.randint(0, len(candidate) - 1)
+            a, b = candidate[i]
+
+            if a != b:
+                candidate[i] = (b, a)
+
+        if not is_cyclic(nodes, candidate):
+            return candidate
 
     return edges
+
 
 def is_valid_dag(nodes, edges, max_parents=2):
     """
@@ -225,6 +212,67 @@ def is_valid_dag(nodes, edges, max_parents=2):
     return all(dfs(n) for n in nodes)
 
 
+def sync_credal_sets_with_structure(lcn):
+    nodes = [str(n).strip() for n in lcn["nodes"]]
+    edges = [(str(a).strip(), str(b).strip()) for a, b in lcn["edges"]]
+
+    parent_map = {n: [] for n in nodes}
+
+    for p, c in edges:
+        if c in parent_map:
+            parent_map[c].append(p)
+
+    new_credal = {}
+
+    for node in nodes:
+
+        parents = sorted(parent_map.get(node, []))  # MUST match sampler
+
+        new_credal[node] = {}
+
+        # ---------------- ROOT NODE ----------------
+        if len(parents) == 0:
+            new_credal[node]["[]"] = {
+                "True": [0.5, 0.5],
+                "False": [0.5, 0.5]
+            }
+            continue
+
+        # ---------------- FULL CPT COVERAGE ----------------
+        # IMPORTANT: must include ALL combinations even if unused
+        for combo in itertools.product([False, True], repeat=len(parents)):
+
+            key = "[" + ", ".join(
+                f"{p}={'True' if v else 'False'}"
+                for p, v in zip(parents, combo)
+            ) + "]"
+
+            new_credal[node][key] = {
+                "True": [0.5, 0.5],
+                "False": [0.5, 0.5]
+            }
+
+        # safety fallback (prevents missing-node crash)
+        if len(new_credal[node]) == 0:
+            new_credal[node]["[]"] = {
+                "True": [0.5, 0.5],
+                "False": [0.5, 0.5]
+            }
+
+    # final safety: ensure ALL nodes exist
+    for n in nodes:
+        if n not in new_credal:
+            new_credal[n] = {
+                "[]": {"True": [0.5, 0.5], "False": [0.5, 0.5]}
+            }
+
+    lcn["nodes"] = nodes
+    lcn["edges"] = edges
+    lcn["credal_sets"] = new_credal
+
+    return lcn
+
+
 def optimize_lcn_bic(initial_lcn, df, max_iters=100, max_parents=2):
     """
     Greedy Hill Climbing using BIC with full LCN validation.
@@ -255,13 +303,15 @@ def optimize_lcn_bic(initial_lcn, df, max_iters=100, max_parents=2):
             "logical_constraints": initial_lcn["logical_constraints"]
         }
 
+        candidate_lcn = sync_credal_sets_with_structure(candidate_lcn)
+
         # Step 2: FULL LCN VALIDATION
         if not validate_generated_lcn(candidate_lcn):
             continue
 
-        # Step 3: enforce DAG + structural constraints (extra safety)
-        if not is_valid_dag(nodes, candidate_edges, max_parents):
-            continue
+        # # Step 3: enforce DAG + structural constraints (extra safety)
+        # if not is_valid_dag(nodes, candidate_edges, max_parents):
+        #     continue
 
         # Step 4: score candidate
         score = compute_bic_score(df, candidate_edges)
@@ -284,35 +334,29 @@ def optimize_lcn_bic(initial_lcn, df, max_iters=100, max_parents=2):
 
 
 def optimize_lcn_ibic(initial_lcn, df, max_iters=100, max_parents=2):
-    """
-    Greedy Hill Climbing using IBIC instead of BIC.
-
-    IMPORTANT DESIGN POINT:
-    - search procedure is identical to BIC version
-    - ONLY scoring function changes
-    - ensures fair comparison between BIC vs IBIC structure learning
-    """
 
     nodes = initial_lcn["nodes"]
     best_edges = initial_lcn["edges"]
 
+    # initial IBIC baseline (safe)
+    try:
+        lcn_aggregate_table, lcn_samples_df = contingency_sample_lcn(initial_lcn, 200)
+
+        ibic_results = interval_bic_structure_learn(
+            lcn_aggregate_table,
+            lcn_samples_df
+        )
+
+        best_score = ibic_results["network_interval"][1]
+    except Exception:
+        best_score = -np.inf
+
     best_lcn = initial_lcn
-
-    # ---- IBIC setup step ----
-    # To computer the IBIC, first you need the aggregate table and samples
-    lcn_aggregate_table, lcn_samples_df = contingency_sample_lcn(initial_lcn, 200)
-
-    ibic_results = interval_bic_structure_learn(
-        lcn_aggregate_table,
-        lcn_samples_df
-    )
-
-    best_score = ibic_results["network_interval"][1]  # upper bound as default
     history = [best_score]
 
     for _ in range(max_iters):
 
-        # 1. mutation (UNCHANGED)
+        # 1. mutate
         candidate_edges = mutate_edges(nodes, best_edges)
 
         candidate_lcn = {
@@ -322,22 +366,27 @@ def optimize_lcn_ibic(initial_lcn, df, max_iters=100, max_parents=2):
             "logical_constraints": initial_lcn["logical_constraints"]
         }
 
-        # 2. validation (UNCHANGED)
+        # 2. sync (CRITICAL: always normalize before anything else)
+        candidate_lcn = sync_credal_sets_with_structure(candidate_lcn)
+
+        # 3. validate DAG + LCN structure
         if not validate_generated_lcn(candidate_lcn):
             continue
 
-        if not is_valid_dag(nodes, candidate_edges, max_parents):
+        # 4. SAFE sampling (guard against missing-key crashes)
+        try:
+            candidate_table, candidate_samples = contingency_sample_lcn(candidate_lcn, 500)
+        except KeyError:
+            # silently skip bad structure instead of crashing
             continue
 
-        # 3. IBIC scoring (NEW)
-        candidate_table, candidate_samples = contingency_sample_lcn(candidate_lcn, 500)
-
+        # 5. IBIC scoring
         interval_per_node = compute_interval_BIC(candidate_table)
         network_interval = compute_network_interval_BIC(interval_per_node)
 
-        candidate_score = (network_interval[0] + network_interval[1]) / 2  # MID
+        candidate_score = (network_interval[0] + network_interval[1]) / 2
 
-        # 4. greedy update
+        # 6. greedy update
         if candidate_score > best_score:
             best_score = candidate_score
             best_edges = candidate_edges
