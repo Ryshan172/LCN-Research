@@ -10,6 +10,7 @@ from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 from pgmpy.estimators import BIC as BicScore
 
 from lcn_functions.lcn_check import validate_generated_lcn
+from workflows.rq1_experiments import contingency_sample_lcn, interval_bic_structure_learn
 
 
 # ----------------- Step 1 code ---------------------------------------------------
@@ -275,6 +276,79 @@ def optimize_lcn_bic(initial_lcn, df, max_iters=100, max_parents=2):
         "nodes": nodes,
         "edges": best_edges,
         "bic_score": best_score,
+        "history": history,
+        "credal_sets": best_lcn["credal_sets"],
+        "logical_constraints": best_lcn["logical_constraints"]
+    }
+
+
+def optimize_lcn_ibic(initial_lcn, df, max_iters=100, max_parents=2):
+    """
+    Greedy Hill Climbing using IBIC instead of BIC.
+
+    IMPORTANT DESIGN POINT:
+    - search procedure is identical to BIC version
+    - ONLY scoring function changes
+    - ensures fair comparison between BIC vs IBIC structure learning
+    """
+
+    nodes = initial_lcn["nodes"]
+    best_edges = initial_lcn["edges"]
+
+    best_lcn = initial_lcn
+
+    # ---- IBIC setup step ----
+    # To computer the IBIC, first you need the aggregate table and samples
+    lcn_aggregate_table, lcn_samples_df = contingency_sample_lcn(initial_lcn, 200)
+
+    ibic_results = interval_bic_structure_learn(
+        lcn_aggregate_table,
+        lcn_samples_df
+    )
+
+    best_score = ibic_results["network_interval"][1]  # upper bound as default
+    history = [best_score]
+
+    for _ in range(max_iters):
+
+        # 1. mutation (UNCHANGED)
+        candidate_edges = mutate_edges(nodes, best_edges)
+
+        candidate_lcn = {
+            "nodes": nodes,
+            "edges": candidate_edges,
+            "credal_sets": initial_lcn["credal_sets"],
+            "logical_constraints": initial_lcn["logical_constraints"]
+        }
+
+        # 2. validation (UNCHANGED)
+        if not validate_generated_lcn(candidate_lcn):
+            continue
+
+        if not is_valid_dag(nodes, candidate_edges, max_parents):
+            continue
+
+        # 3. IBIC scoring (NEW)
+        candidate_table, candidate_samples = contingency_sample_lcn(candidate_lcn, 200)
+
+        ibic_result = interval_bic_structure_learn(
+            candidate_table,
+            candidate_samples
+        )
+
+        candidate_score = ibic_result["network_interval"][1]  # or mid/low/high strategy
+
+        # 4. greedy update
+        if candidate_score > best_score:
+            best_score = candidate_score
+            best_edges = candidate_edges
+            best_lcn = candidate_lcn
+            history.append(best_score)
+
+    return {
+        "nodes": nodes,
+        "edges": best_edges,
+        "ibic_score": best_score,
         "history": history,
         "credal_sets": best_lcn["credal_sets"],
         "logical_constraints": best_lcn["logical_constraints"]

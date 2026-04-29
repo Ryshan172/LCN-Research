@@ -1,4 +1,4 @@
-from workflows.app_lcn_gen import generate_basic_lcn, optimize_lcn_bic
+from workflows.app_lcn_gen import generate_basic_lcn, optimize_lcn_bic, optimize_lcn_ibic
 
 
 def generate_initial_lcn_graph(csv_data):
@@ -26,14 +26,14 @@ def run_lcn_bic_optimization(initial_lcn, df):
 
 
 
-def optimize_lcn_ibic(initial_lcn):
+def run_lcn_ibic_optimization(initial_lcn, df):
     """
     - Use same search procedure and mutations as BIC version
     - Use Interval BIC (IBIC) instead of BIC
     - Output LCN
     """
 
-    ibic_lcn = {}
+    ibic_lcn = optimize_lcn_ibic(initial_lcn=initial_lcn, df=df)
 
     return ibic_lcn
 
@@ -56,14 +56,16 @@ def run_application_workflow(csv_data):
     # Step 2: Optimize initial graph using BIC
     bic_lcn = optimize_lcn_bic(initial_lcn, df)
 
+    # Step 3: Optimize initial graph using IBIC
+    ibic_lcn = run_lcn_ibic_optimization(initial_lcn, df)
+
     print("Initial LCN: ")
     print(initial_lcn)
 
     print("BIC LCN: ")
     print(bic_lcn)
 
-    # Step 3: Optimize initial graph using IBIC
-    ibic_lcn = optimize_lcn_ibic(initial_lcn)
-
+    print("IBIC LCN: ")
+    print(ibic_lcn)
 
     return 
