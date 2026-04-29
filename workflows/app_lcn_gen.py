@@ -10,6 +10,7 @@ from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 from pgmpy.estimators import BIC as BicScore
 
 from lcn_functions.lcn_check import validate_generated_lcn
+from scoring_functions.interval_bic_derivation import compute_interval_BIC, compute_network_interval_BIC
 from workflows.rq1_experiments import contingency_sample_lcn, interval_bic_structure_learn
 
 
@@ -266,7 +267,7 @@ def optimize_lcn_bic(initial_lcn, df, max_iters=100, max_parents=2):
         score = compute_bic_score(df, candidate_edges)
 
         # Step 5: greedy acceptance
-        if score > best_score:
+        if score > best_score or random.random() < 0.05:
             best_score = score
             best_edges = candidate_edges
             best_lcn = candidate_lcn
@@ -329,14 +330,12 @@ def optimize_lcn_ibic(initial_lcn, df, max_iters=100, max_parents=2):
             continue
 
         # 3. IBIC scoring (NEW)
-        candidate_table, candidate_samples = contingency_sample_lcn(candidate_lcn, 200)
+        candidate_table, candidate_samples = contingency_sample_lcn(candidate_lcn, 500)
 
-        ibic_result = interval_bic_structure_learn(
-            candidate_table,
-            candidate_samples
-        )
+        interval_per_node = compute_interval_BIC(candidate_table)
+        network_interval = compute_network_interval_BIC(interval_per_node)
 
-        candidate_score = ibic_result["network_interval"][1]  # or mid/low/high strategy
+        candidate_score = (network_interval[0] + network_interval[1]) / 2  # MID
 
         # 4. greedy update
         if candidate_score > best_score:
