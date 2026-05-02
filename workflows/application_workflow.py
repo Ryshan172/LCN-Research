@@ -1,8 +1,15 @@
+import json
+import os
 from itertools import product
 
-from workflows.app_lcn_gen import generate_basic_lcn, optimize_lcn_bic, optimize_lcn_ibic
+import numpy as np
+
+from workflows.app_lcn_gen import generate_basic_lcn, load_dataset, optimize_lcn_bic, optimize_lcn_ibic
 from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 from pgmpy.factors.discrete import TabularCPD
+
+from pgmpy.inference import VariableElimination
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 
 def generate_initial_lcn_graph(csv_data):
@@ -181,6 +188,130 @@ def convert_lcn_to_bn(lcn):
     return low_bn, mid_bn, high_bn
 
 
+def apply_graph_data_prediction(bn, df, target="X14"):
+    """
+    Apply a Bayesian Network to dataset and evaluate predictive performance.
+
+    Inputs:
+    - bn: pgmpy BayesianNetwork (already constructed with CPDs)
+    - df: pandas DataFrame (binary data)
+    - target: node to predict
+
+    Returns:
+    - dict with predictions + evaluation metrics
+    """
+
+    infer = VariableElimination(bn)
+
+    y_true = []
+    y_pred = []
+
+    nodes = list(df.columns)
+
+    for _, row in df.iterrows():
+
+        # ground truth
+        true_value = int(row[target])
+
+        # evidence = all other variables
+        evidence = {
+            col: int(row[col])
+            for col in nodes
+            if col != target
+        }
+
+        try:
+            result = infer.query(
+                variables=[target],
+                evidence=evidence,
+                show_progress=False
+            )
+
+            # binary classification: pick most likely state
+            pred_value = int(np.argmax(result.values))
+
+        except Exception:
+            # fallback if inference fails
+            pred_value = 0
+
+        y_true.append(true_value)
+        y_pred.append(pred_value)
+
+    # metrics
+    output = {
+        "target": target,
+        "accuracy": accuracy_score(y_true, y_pred),
+        "precision": precision_score(y_true, y_pred, zero_division=0),
+        "recall": recall_score(y_true, y_pred, zero_division=0),
+        "f1": f1_score(y_true, y_pred, zero_division=0),
+        "n_samples": len(y_true),
+        "predictions": y_pred[:20],  # sample preview
+        "truth": y_true[:20]
+    }
+
+    return output
+
+
+def save_lcn_to_json(lcn, path):
+    """
+    Save LCN structure to JSON for reuse.
+    """
+
+    # ensure folder exists
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    with open(path, "w") as f:
+        json.dump(lcn, f, indent=4)
+
+
+def load_lcn_from_json(path):
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+def run_predictions(bns, targets, df):
+    """
+    Run predictions for multiple Bayesian Networks and targets.
+    Each result is saved individually as:
+
+    prediction_results/{bn_name}_{target}.json
+    """
+
+    base_dir = "prediction_results"
+    os.makedirs(base_dir, exist_ok=True)
+
+    results = {}
+
+    for bn_name, bn in bns.items():
+        results[bn_name] = {}
+
+        for target in targets:
+
+            print(f"Running prediction: {bn_name} -> {target}")
+
+            res = apply_graph_data_prediction(
+                bn=bn,
+                df=df,
+                target=target
+            )
+
+            # store in memory structure
+            results[bn_name][target] = res
+
+            # required file save
+            file_path = os.path.join(
+                base_dir,
+                f"{bn_name}_{target}.json"
+            )
+
+            with open(file_path, "w") as f:
+                json.dump(res, f, indent=4)
+
+            print("Saved result")
+
+    return results
+
+
 
 def run_application_workflow(csv_data):
 
@@ -191,33 +322,61 @@ def run_application_workflow(csv_data):
     Note: Overall point is to generate a graph and improve it using different approachs
     Then test predication on the data and see which optimisation approach worked best i.e
     using the IBIC vs BIC
+
+    Note: Most steps have been commented out due to using saved json versions
     """
     
 
     # Step 1: Load data and generate initial LCN graph 
-    initial_lcn, df = generate_initial_lcn_graph(csv_data)
+    # Df is a dataframe of the csv data 
+    # initial_lcn, df = generate_initial_lcn_graph(csv_data)
+    df = load_dataset(csv_data)
 
     # Step 2: Optimize initial graph using BIC
-    bic_lcn = optimize_lcn_bic(initial_lcn, df)
+    # bic_lcn = optimize_lcn_bic(initial_lcn, df)
+    # save_lcn_to_json(bic_lcn, "med_lcns/med_bic_lcn.json")
+    bic_lcn = load_lcn_from_json("med_lcns/med_bic_lcn.json")
 
     # Step 3: Optimize initial graph using IBIC
-    ibic_lcn = run_lcn_ibic_optimization(initial_lcn, df)
+    # ibic_lcn = run_lcn_ibic_optimization(initial_lcn, df)
+    # save_lcn_to_json(ibic_lcn, "med_lcns/med_ibic_lcn.json")
+    ibic_lcn = load_lcn_from_json("med_lcns/med_ibic_lcn.json")
 
-    # print("Initial LCN: ")
-    # print(initial_lcn)
 
-    # print("BIC LCN: ")
-    # print(bic_lcn)
-
-    # print("IBIC LCN: ")
-    # print(ibic_lcn)
-
-    # Extract a Bayesian Networks from the lcn
+    # Step 4: Extract a Bayesian Networks from the lcn
     # BIC optimised LCN case
     bic_low_bn, bic_mid_bn, bic_high_bn = convert_lcn_to_bn(bic_lcn)
 
     # IBIC optimised LCN case
     ibic_low_bn, ibic_mid_bn, ibic_high_bn = convert_lcn_to_bn(ibic_lcn)
 
+    # Step 5: Apply LCNs to the data to make predictions 
+    # bic_bn_low_predict = apply_graph_data_prediction(bic_low_bn, df, target="X14")
+
+    # print("Results: ")
+    # print(bic_bn_low_predict)
+
+    # Step 5 new:
+    bns = {
+        "bic_low": bic_low_bn,
+        "bic_mid": bic_mid_bn,
+        "bic_high": bic_high_bn,
+        "ibic_low": ibic_low_bn,
+        "ibic_mid": ibic_mid_bn,
+        "ibic_high": ibic_high_bn
+    }
+    
+
+    targets = ["X9", "X10", "X11", "X12", "X13", "X14"]
+
+    results = run_predictions(
+        bns=bns,
+        targets=targets,
+        df=df
+    )
+
+    print("Completed all predictions.")
+    print("Sample result (bic_low, X14):")
+    print(results["bic_low"]["X14"])
 
     return 
