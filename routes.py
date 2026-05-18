@@ -9,11 +9,14 @@ from sampler_functions.contingency_sampler import run_aggregate_sampler
 from scoring_functions.interval_bic_score import compute_interval_bic_score
 from utils.data_saving import save_experiment_to_json
 from utils.data_summaries import summarise_experiments_to_csv
+from utils.med_data_summary import summarise_med_experiments
 from utils.util_functions import save_json_data
 from learn_structure import learn_structure_lcn_samples
 from pgmpy.estimators import BIC as BicScore
 from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 
+from workflows.application_workflow import run_application_workflow, summarise_application_results
+from workflows.med_data_workflow import run_medical_experiments
 from workflows.rq1_experiments import experiment_run_controller, experiment_run_variants
 
 router = APIRouter()
@@ -258,6 +261,40 @@ def summarise_experiment_results():
             input_dir="results",
             output_csv="experiment_summary.csv"
         )
+
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error running experiments: {e}"
+        )
+    
+
+@router.post("/run-medical-application")
+def run_med_data_experiments():
+    try:
+        # Run all experiments
+        run_application_workflow("medical_data.csv")
+
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error running experiments: {e}"
+        )
+    
+
+@router.post("/summarise-med-results")
+def summarise_experiment_results():
+    try:
+
+        summarise_application_results()
 
         return {
             "status": "success",

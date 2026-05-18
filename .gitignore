@@ -6,6 +6,7 @@ __pycache__/
 
 # Ignore results
 results
+results_med
 
 # Ignore summary csv
 experiment_summary.csv

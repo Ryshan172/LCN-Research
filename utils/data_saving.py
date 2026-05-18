@@ -46,3 +46,16 @@ def save_experiment_to_json(experiment_res, run_id, output_dir="results"):
         json.dump(json_safe_res, f, indent=2)
 
     return str(file_path)
+
+
+def save_application_to_json(experiment_res, run_id, output_dir="results_med"):
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    file_path = Path(output_dir) / f"{run_id}.json"
+
+    json_safe_res = make_json_safe(experiment_res)
+
+    with open(file_path, "w") as f:
+        json.dump(json_safe_res, f, indent=2)
+
+    return str(file_path)
