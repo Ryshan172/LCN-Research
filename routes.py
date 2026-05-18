@@ -15,7 +15,7 @@ from learn_structure import learn_structure_lcn_samples
 from pgmpy.estimators import BIC as BicScore
 from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 
-from workflows.application_workflow import run_application_workflow
+from workflows.application_workflow import run_application_workflow, summarise_application_results
 from workflows.med_data_workflow import run_medical_experiments
 from workflows.rq1_experiments import experiment_run_controller, experiment_run_variants
 
@@ -294,11 +294,7 @@ def run_med_data_experiments():
 def summarise_experiment_results():
     try:
 
-        # Summarising results of all experiments in results
-        df = summarise_med_experiments(
-            input_dir="results_med",
-            output_csv="med_app_summary.csv"
-        )
+        summarise_application_results()
 
         return {
             "status": "success",

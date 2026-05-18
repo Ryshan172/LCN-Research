@@ -3,6 +3,8 @@ import os
 from itertools import product
 
 import numpy as np
+import pandas as pd
+import random
 
 from workflows.app_lcn_gen import generate_basic_lcn, load_dataset, optimize_lcn_bic, optimize_lcn_ibic
 from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
@@ -171,6 +173,79 @@ def _build_bn(lcn, mode="mid"):
     # strict validation (better error visibility)
     if not model.check_model():
         raise ValueError(f"Invalid BN constructed in mode={mode}")
+
+    return model
+
+
+def _extract_prob_random(triple):
+    low, high = float(triple[0]), float(triple[1])
+    return random.uniform(low, high)
+
+
+def _build_bn_fully_random(lcn, seed=None):
+    """
+    Random BN baseline:
+    - same structure
+    - completely random CPTs (ignores credal sets)
+    """
+
+    if seed is not None:
+        random.seed(seed)
+
+    edges = lcn["edges"]
+
+    model = BayesianNetwork()
+    model.add_nodes_from(lcn["nodes"])
+    model.add_edges_from(edges)
+
+    cpds = []
+
+    for node in lcn["nodes"]:
+
+        parents = _parse_parents(edges, node)
+
+        # NO PARENTS
+        if not parents:
+            p_true = random.random()
+            p_false = 1 - p_true
+
+            cpd = TabularCPD(
+                variable=node,
+                variable_card=2,
+                values=[[p_false], [p_true]]
+            )
+            cpds.append(cpd)
+            continue
+
+        # WITH PARENTS
+        evidence = parents
+        evidence_card = [2] * len(parents)
+
+        true_row = []
+        false_row = []
+
+        for _ in _get_configurations(parents):
+
+            p_true = random.random()
+            p_false = 1 - p_true
+
+            true_row.append(p_true)
+            false_row.append(p_false)
+
+        cpd = TabularCPD(
+            variable=node,
+            variable_card=2,
+            values=[false_row, true_row],
+            evidence=evidence,
+            evidence_card=evidence_card
+        )
+
+        cpds.append(cpd)
+
+    model.add_cpds(*cpds)
+
+    if not model.check_model():
+        raise ValueError("Invalid random BN")
 
     return model
 
@@ -351,23 +426,27 @@ def run_application_workflow(csv_data):
     ibic_low_bn, ibic_mid_bn, ibic_high_bn = convert_lcn_to_bn(ibic_lcn)
 
     # Step 5: Apply LCNs to the data to make predictions 
-    # bic_bn_low_predict = apply_graph_data_prediction(bic_low_bn, df, target="X14")
+    bic_bn_low_predict = apply_graph_data_prediction(bic_low_bn, df, target="X14")
 
     # print("Results: ")
-    # print(bic_bn_low_predict)
+    print(bic_bn_low_predict)
 
-    # Step 5 new:
+
+    # Random BN 
+    bn_random = _build_bn_fully_random(ibic_lcn)
+
+    # Step 5:
     bns = {
         "bic_low": bic_low_bn,
         "bic_mid": bic_mid_bn,
         "bic_high": bic_high_bn,
         "ibic_low": ibic_low_bn,
         "ibic_mid": ibic_mid_bn,
-        "ibic_high": ibic_high_bn
+        "ibic_high": ibic_high_bn,
+        "bn_rand": bn_random
     }
-    
 
-    targets = ["X9", "X10", "X11", "X12", "X13", "X14"]
+    targets = ["X7", "X8", "X9"]
 
     results = run_predictions(
         bns=bns,
@@ -376,7 +455,66 @@ def run_application_workflow(csv_data):
     )
 
     print("Completed all predictions.")
-    print("Sample result (bic_low, X14):")
-    print(results["bic_low"]["X14"])
 
     return 
+
+
+def summarise_application_results(
+    results_dir="prediction_results",
+    output_csv="prediction_summary.csv"
+):
+    """
+    Reads all prediction result JSON files and summarises into a CSV.
+
+    Output format:
+    model, target, accuracy, precision, recall, f1
+    """
+
+    rows = []
+
+    for file in os.listdir(results_dir):
+
+        if not file.endswith(".json"):
+            continue
+
+        file_path = os.path.join(results_dir, file)
+
+        # 🔹 Extract model + target from filename
+        # e.g. "bic_low_X14.json" → model="bic_low", target="X14"
+        name = file.replace(".json", "")
+        parts = name.split("_")
+
+        # model name = everything except last part
+        model = "_".join(parts[:-1])
+        target_from_filename = parts[-1]
+
+        # Load JSON
+        with open(file_path, "r") as f:
+            data = json.load(f)
+
+        # Extract metrics (use JSON target as ground truth)
+        row = {
+            "model": model,
+            "target": data.get("target", target_from_filename),
+            "accuracy": data.get("accuracy"),
+            "precision": data.get("precision"),
+            "recall": data.get("recall"),
+            "f1": data.get("f1"),
+            "n_samples": data.get("n_samples")
+        }
+
+        rows.append(row)
+
+    # Create DataFrame
+    df = pd.DataFrame(rows)
+
+    # Optional: sort nicely
+    df = df.sort_values(by=["model", "target"]).reset_index(drop=True)
+
+    # Save CSV
+    df.to_csv(output_csv, index=False)
+
+    print(f"Saved summary to: {output_csv}")
+    print(df.head())
+
+    return df
