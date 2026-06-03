@@ -1,7 +1,7 @@
-
 import pandas as pd
 import itertools
 import numpy as np
+import copy
 
 from lcn_functions.model import create_lcn
 from sampler_functions.contingency_sampler import sample_dataset, credal_aggregate_intervals
@@ -15,17 +15,16 @@ from pgmpy.estimators import MaximumLikelihoodEstimator
 RQ2: Heuristic Structure Learning over LCNs using Interval BIC
 - mutation strategies
 - hill climbing / random restart / tabu search
+- constraint-aware structure learning
 """
 
 
-
-#----------- 1. LCN GENERATION ------------------------------------
+# ----------- 1. LCN GENERATION ------------------------------------
 def generate_lcn(size, interval_width, width_dist_type, in_degree):
     return create_lcn(size, interval_width, width_dist_type, in_degree)
 
 
 def sample_lcn(lcn, num_samples):
-
     samples = sample_dataset(lcn, num_samples)
     samples_df = pd.DataFrame(samples)
 
@@ -34,41 +33,84 @@ def sample_lcn(lcn, num_samples):
     return samples_df, aggregate_table
 
 
-#-------- 2. INITIAL STRUCTURE -----------------------------------
+# -------- 2. INITIAL STRUCTURE -------------------------
 def initialise_structure(nodes, strategy="empty"):
     """
-    TODO:
-    - empty graph
-    - random DAG
-    """
-    return []
+    Instead of returning an edge list, 
+    returns FULL LCN STATE (edges + constraints + credal sets placeholder)
 
-
-#----- 3. MUTATION OPERATORS ----------------------------------
-def mutate_graph(edges, nodes, mutation_type="edge_add"):
-    """
-    TODO:
-    - edge_add
-    - edge_delete
-    - edge_flip
-    - constraint-aware mutation (optional)
+    WHY:
+    - mutation operates on LCN structure, not just edges
+    - constraints must persist through search
     """
 
-    # Placeholder: YOU will implement real logic later
-    return edges.copy()
+    return {
+        "nodes": list(nodes),
+        "edges": [],
+        "credal_sets": {},
+        "logical_constraints": []
+    }
 
 
-#-------------- 4. INTERVAL BIC SCORE (PLUGIN) ----------------------
-def score_structure(edges, samples_df, aggregate_table, scoring="mid"):
+# ----- 3. MUTATION OPERATORS ------------
+def mutate_graph(lcn_state, mutation_type="edge_add", max_attempts=10):
     """
-    TODO:
-    Plug in Interval BIC implementation here
+    Mutates full LCN state instead of just edges 
+
+    Why:
+    - constraints must be checked during mutation
+    - credal structure must stay consistent with edges
     """
 
+    nodes = lcn_state["nodes"]
+    edges = copy.deepcopy(lcn_state["edges"])
+
+    for _ in range(max_attempts):
+
+        candidate = copy.deepcopy(lcn_state)
+        candidate_edges = copy.deepcopy(edges)
+
+        if mutation_type == "edge_add":
+            a, b = np.random.choice(nodes, 2, replace=False)
+
+            if (a, b) not in candidate_edges:
+                candidate_edges.append((a, b))
+
+        elif mutation_type == "edge_delete":
+            if candidate_edges:
+                candidate_edges.pop(np.random.randint(len(candidate_edges)))
+
+        elif mutation_type == "edge_flip":
+            if candidate_edges:
+                i = np.random.randint(len(candidate_edges))
+                a, b = candidate_edges[i]
+                candidate_edges[i] = (b, a)
+
+        # update candidate state
+        candidate["edges"] = candidate_edges
+
+        return candidate
+
+    return lcn_state
+
+
+# -------- 4. SCORE FUNCTION ------------------
+def score_structure(lcn_state, samples_df, aggregate_table, scoring="mid"):
+    """
+    Scores full LCN state instead of edges only
+
+    Why:
+    - interval BIC depends on structure + credal interpretation
+    - future constraint-aware scoring will require full LCN
+    """
+
+    edges = lcn_state["edges"]
+
+    # TODO: replace with Interval BIC implementation
     return 0.0
 
 
-#-------- 5. HILL CLIMBING CORE -------------------------------
+# -------- 5. HILL CLIMBING CORE -------------------
 def hill_climb(
     samples_df,
     aggregate_table,
@@ -77,17 +119,19 @@ def hill_climb(
     max_iter=100
 ):
 
+    # Initialises FULL LCN state
     current = initialise_structure(nodes)
     current_score = score_structure(current, samples_df, aggregate_table)
 
-    best = current.copy()
+    best = copy.deepcopy(current)
     best_score = current_score
 
     trajectory = [current_score]
 
     for _ in range(max_iter):
 
-        candidate = mutate_graph(current, nodes, mutation_type)
+        # Mutation operates on full LCN state
+        candidate = mutate_graph(current, mutation_type)
         candidate_score = score_structure(candidate, samples_df, aggregate_table)
 
         if candidate_score > current_score:
@@ -95,7 +139,7 @@ def hill_climb(
             current_score = candidate_score
 
             if candidate_score > best_score:
-                best = candidate.copy()
+                best = copy.deepcopy(candidate)
                 best_score = candidate_score
 
         trajectory.append(current_score)
@@ -103,7 +147,7 @@ def hill_climb(
     return best, trajectory
 
 
-#---------- 6. RANDOM RESTART HILL CLIMBING -------------------
+# ---------- 6. RANDOM RESTART ------------------------
 def random_restart_hill_climb(
     samples_df,
     aggregate_table,
@@ -137,10 +181,7 @@ def random_restart_hill_climb(
     return best_overall, full_trajectory
 
 
-# =========================================================
-# 7. TABU SEARCH
-# =========================================================
-
+# ------------- 7. TABU SEARCH ------------------
 def tabu_search(
     samples_df,
     aggregate_table,
@@ -153,23 +194,23 @@ def tabu_search(
     current = initialise_structure(nodes)
     current_score = score_structure(current, samples_df, aggregate_table)
 
-    best = current.copy()
+    best = copy.deepcopy(current)
     best_score = current_score
 
     tabu_list = []
-
     trajectory = [current_score]
 
     for _ in range(max_iter):
 
-        candidate = mutate_graph(current, nodes, mutation_type)
+        candidate = mutate_graph(current, mutation_type)
 
-        if candidate in tabu_list:
+        # Tabu must compare LCN STATES, not raw edges
+        if any(candidate["edges"] == t["edges"] for t in tabu_list):
             continue
 
         candidate_score = score_structure(candidate, samples_df, aggregate_table)
 
-        tabu_list.append(candidate)
+        tabu_list.append(copy.deepcopy(candidate))
 
         if len(tabu_list) > tabu_size:
             tabu_list.pop(0)
@@ -179,7 +220,7 @@ def tabu_search(
             current_score = candidate_score
 
         if candidate_score > best_score:
-            best = candidate.copy()
+            best = copy.deepcopy(candidate)
             best_score = candidate_score
 
         trajectory.append(current_score)
@@ -187,9 +228,8 @@ def tabu_search(
     return best, trajectory
 
 
-#------------ 8. EVALUATION METRICS -------------------
+# ------------ 8. EVALUATION METRICS ------------------
 def evaluate_interval_bic(trajectory):
-
     return {
         "best_score": max(trajectory),
         "convergence_speed": len(trajectory),
@@ -198,7 +238,6 @@ def evaluate_interval_bic(trajectory):
 
 
 def compute_shd(true_model, learned_edges):
-
     return structural_hamming_distance_compare(
         list(true_model.edges()),
         list(learned_edges)
@@ -237,7 +276,6 @@ def compute_edge_metrics(true_model, learned_edges, nodes):
 
 
 def compute_kl(true_model, learned_model, samples_df):
-
     return kl_divergence_from_samples(
         true_model=true_model,
         approx_model=learned_model,
@@ -245,7 +283,7 @@ def compute_kl(true_model, learned_model, samples_df):
     )
 
 
-#---------- 9. EXPERIMENT RUNNER -------------------------------
+# ---------- 9. EXPERIMENT RUNNER -------------
 def run_experiment_steps(
     size,
     interval_width,
@@ -257,22 +295,17 @@ def run_experiment_steps(
 ):
 
     # (1) Ground-truth LCN
-    lcn = generate_lcn(
-        size,
-        interval_width,
-        width_dist_type,
-        in_degree
-    )
+    lcn = generate_lcn(size, interval_width, width_dist_type, in_degree)
 
     # (2) Sampling
     samples_df, aggregate_table = sample_lcn(lcn, num_samples)
 
     nodes = list(lcn.nodes())
 
-    # (3-5) STRUCTURE LEARNING
+    # Receives FULL LCN as output, not edges only
     if search_method == "hill_climbing":
 
-        best_edges, trajectory = hill_climb(
+        best_lcn, trajectory = hill_climb(
             samples_df,
             aggregate_table,
             nodes,
@@ -281,7 +314,7 @@ def run_experiment_steps(
 
     elif search_method == "random_restart":
 
-        best_edges, trajectory = random_restart_hill_climb(
+        best_lcn, trajectory = random_restart_hill_climb(
             samples_df,
             aggregate_table,
             nodes,
@@ -290,7 +323,7 @@ def run_experiment_steps(
 
     elif search_method == "tabu":
 
-        best_edges, trajectory = tabu_search(
+        best_lcn, trajectory = tabu_search(
             samples_df,
             aggregate_table,
             nodes,
@@ -300,28 +333,23 @@ def run_experiment_steps(
     else:
         raise ValueError("Unknown search method")
 
-    # (6) Interval BIC evaluation
+    # Edges are extracted only for evaluation
+    best_edges = best_lcn["edges"] 
+
     bic_metrics = evaluate_interval_bic(trajectory)
 
-    # (7a) SHD
+    # SHD
     shd = compute_shd(lcn, best_edges)
 
-    # (7b) edge metrics
-    edge_metrics = compute_edge_metrics(
-        lcn,
-        best_edges,
-        nodes
-    )
+    edge_metrics = compute_edge_metrics(lcn, best_edges, nodes)
 
-    # (7c) KL divergence
+    # KL Divergence 
     learned_bn = DiscreteBayesianNetwork(best_edges)
     learned_bn.add_nodes_from(nodes)
     learned_bn.fit(samples_df, estimator=MaximumLikelihoodEstimator)
 
     kl = compute_kl(lcn, learned_bn, samples_df)
 
-
-    # Results
     return {
         "config": {
             "size": size,
@@ -331,10 +359,6 @@ def run_experiment_steps(
             "num_samples": num_samples,
             "search_method": search_method,
             "mutation_type": mutation_type
-        },
-        "data": {
-            "samples_df": samples_df,
-            "aggregate_table": aggregate_table
         },
         "structure": {
             "learned_edges": best_edges,
