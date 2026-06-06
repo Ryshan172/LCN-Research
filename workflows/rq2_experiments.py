@@ -4,6 +4,7 @@ import numpy as np
 import copy
 
 from lcn_functions.model import create_lcn
+from mutations.mutation_functions import standard_mutation, contraint_aware_mutation, post_mutation_contraint_repair
 from sampler_functions.contingency_sampler import sample_dataset, credal_aggregate_intervals
 from metric_functions.structural_hamming_distance import structural_hamming_distance_compare
 from metric_functions.kl_divergence import kl_divergence_from_samples
@@ -17,6 +18,31 @@ RQ2: Heuristic Structure Learning over LCNs using Interval BIC
 - hill climbing / random restart / tabu search
 - constraint-aware structure learning
 """
+
+#----- Helpers ------------------------------------------
+def build_constraint_index(logical_constraints):
+    """
+    Precompute constraint → variable index.
+
+    WHY:
+    This enforces Assumption 2 (locality) in practice.
+
+    Instead of scanning ALL constraints per mutation,
+    we do O(1)-style lookup per affected node.
+    """
+
+    index = {}
+
+    for rule in logical_constraints:
+
+        variables = set(rule["if"].keys()) | set(rule["then"].keys())
+
+        for v in variables:
+            if v not in index:
+                index[v] = []
+            index[v].append(rule)
+
+    return index
 
 
 # ----------- 1. LCN GENERATION ------------------------------------
@@ -36,63 +62,51 @@ def sample_lcn(lcn, num_samples):
 # -------- 2. INITIAL STRUCTURE -------------------------
 def initialise_structure(nodes, strategy="empty"):
     """
-    Instead of returning an edge list, 
-    returns FULL LCN STATE (edges + constraints + credal sets placeholder)
+    Full LCN state initialisation.
 
-    WHY:
-    - mutation operates on LCN structure, not just edges
-    - constraints must persist through search
+    IMPORTANT CHANGE:
+    We now build a constraint index so locality is REAL,
+    not just assumed in theory.
     """
+
+    logical_constraints = []
 
     return {
         "nodes": list(nodes),
         "edges": [],
         "credal_sets": {},
-        "logical_constraints": []
+        "logical_constraints": logical_constraints,
+
+        # locality support structure
+        "constraint_index": build_constraint_index(logical_constraints)
     }
 
 
 # ----- 3. MUTATION OPERATORS ------------
-def mutate_graph(lcn_state, mutation_type="edge_add", max_attempts=10):
-    """
-    Mutates full LCN state instead of just edges 
+def mutate_lcn(lcn_state, strategy="standard", mutation_type="edge_add"):
+    
+    constraint_index = lcn_state.get("constraint_index", None)
 
-    Why:
-    - constraints must be checked during mutation
-    - credal structure must stay consistent with edges
-    """
+    if strategy == "standard":
+        return standard_mutation(lcn_state, mutation_type)
 
-    nodes = lcn_state["nodes"]
-    edges = copy.deepcopy(lcn_state["edges"])
+    elif strategy == "constraint":
+        return contraint_aware_mutation(
+            lcn_state,
+            constraint_index,
+            mutation_type
+        )
 
-    for _ in range(max_attempts):
+    elif strategy == "repair":
+        return post_mutation_contraint_repair(
+            lcn_state,
+            constraint_index,
+            mutation_type
+        )
 
-        candidate = copy.deepcopy(lcn_state)
-        candidate_edges = copy.deepcopy(edges)
-
-        if mutation_type == "edge_add":
-            a, b = np.random.choice(nodes, 2, replace=False)
-
-            if (a, b) not in candidate_edges:
-                candidate_edges.append((a, b))
-
-        elif mutation_type == "edge_delete":
-            if candidate_edges:
-                candidate_edges.pop(np.random.randint(len(candidate_edges)))
-
-        elif mutation_type == "edge_flip":
-            if candidate_edges:
-                i = np.random.randint(len(candidate_edges))
-                a, b = candidate_edges[i]
-                candidate_edges[i] = (b, a)
-
-        # update candidate state
-        candidate["edges"] = candidate_edges
-
-        return candidate
-
-    return lcn_state
-
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+    
 
 # -------- 4. SCORE FUNCTION ------------------
 def score_structure(lcn_state, samples_df, aggregate_table, scoring="mid"):
@@ -115,11 +129,14 @@ def hill_climb(
     samples_df,
     aggregate_table,
     nodes,
+    mutation_strategy="standard",
     mutation_type="edge_add",
     max_iter=100
 ):
+    """
+    Standard greedy hill climbing over FULL LCN state.
+    """
 
-    # Initialises FULL LCN state
     current = initialise_structure(nodes)
     current_score = score_structure(current, samples_df, aggregate_table)
 
@@ -130,8 +147,13 @@ def hill_climb(
 
     for _ in range(max_iter):
 
-        # Mutation operates on full LCN state
-        candidate = mutate_graph(current, mutation_type)
+        # correct mutation interface
+        candidate = mutate_lcn(
+            current,
+            strategy=mutation_strategy,
+            mutation_type=mutation_type
+        )
+
         candidate_score = score_structure(candidate, samples_df, aggregate_table)
 
         if candidate_score > current_score:
@@ -153,9 +175,18 @@ def random_restart_hill_climb(
     aggregate_table,
     nodes,
     mutation_type="edge_add",
+    mutation_strategy="standard",
     n_restarts=10,
     max_iter=50
 ):
+    """
+    Random restart hill climbing over full LCN state.
+
+    FIX:
+    Now correctly forwards BOTH:
+    - mutation_strategy (standard / constraint / repair)
+    - mutation_type (edge_add / delete / flip)
+    """
 
     best_overall = None
     best_score = -np.inf
@@ -167,8 +198,9 @@ def random_restart_hill_climb(
             samples_df,
             aggregate_table,
             nodes,
-            mutation_type,
-            max_iter
+            mutation_strategy=mutation_strategy,
+            mutation_type=mutation_type,
+            max_iter=max_iter
         )
 
         final_score = traj[-1]
@@ -186,10 +218,14 @@ def tabu_search(
     samples_df,
     aggregate_table,
     nodes,
+    mutation_strategy="standard",
     mutation_type="edge_add",
     tabu_size=10,
     max_iter=100
 ):
+    """
+    Tabu search over FULL LCN state.
+    """
 
     current = initialise_structure(nodes)
     current_score = score_structure(current, samples_df, aggregate_table)
@@ -202,9 +238,13 @@ def tabu_search(
 
     for _ in range(max_iter):
 
-        candidate = mutate_graph(current, mutation_type)
+        candidate = mutate_lcn(
+            current,
+            strategy=mutation_strategy,
+            mutation_type=mutation_type
+        )
 
-        # Tabu must compare LCN STATES, not raw edges
+        # Tabu check (structure-level comparison)
         if any(candidate["edges"] == t["edges"] for t in tabu_list):
             continue
 
@@ -291,25 +331,40 @@ def run_experiment_steps(
     in_degree,
     num_samples,
     search_method="hill_climbing",
-    mutation_type="edge_add"
+    mutation_type="edge_add",
+    mutation_strategy="standard"
 ):
-
-    # (1) Ground-truth LCN
+    # ----------------------------------------------------
+    # STEP 1: Generate a ground-truth LCN (data-generating model)
+    # ----------------------------------------------------
     lcn = generate_lcn(size, interval_width, width_dist_type, in_degree)
 
-    # (2) Sampling
+    # ----------------------------------------------------
+    # STEP 2: Sample data from the LCN
+    # - produces observed dataset (samples_df)
+    # - produces interval/credal aggregation statistics
+    # ----------------------------------------------------
     samples_df, aggregate_table = sample_lcn(lcn, num_samples)
 
+    # ----------------------------------------------------
+    # STEP 3: Extract node set for structure learning
+    # (search operates over graph structure, not raw model)
+    # ----------------------------------------------------
     nodes = list(lcn.nodes())
 
-    # Receives FULL LCN as output, not edges only
+    # ----------------------------------------------------
+    # STEP 4: Run structure learning (search phase)
+    # - chooses optimisation strategy (HC / RR / Tabu)
+    # - returns best learned structure + score trajectory
+    # ----------------------------------------------------
     if search_method == "hill_climbing":
 
         best_lcn, trajectory = hill_climb(
             samples_df,
             aggregate_table,
             nodes,
-            mutation_type
+            mutation_strategy=mutation_strategy,
+            mutation_type=mutation_type
         )
 
     elif search_method == "random_restart":
@@ -318,7 +373,8 @@ def run_experiment_steps(
             samples_df,
             aggregate_table,
             nodes,
-            mutation_type
+            mutation_type=mutation_type,
+            mutation_strategy=mutation_strategy
         )
 
     elif search_method == "tabu":
@@ -327,29 +383,52 @@ def run_experiment_steps(
             samples_df,
             aggregate_table,
             nodes,
-            mutation_type
+            mutation_strategy=mutation_strategy,
+            mutation_type=mutation_type
         )
 
     else:
         raise ValueError("Unknown search method")
 
-    # Edges are extracted only for evaluation
-    best_edges = best_lcn["edges"] 
+    # ----------------------------------------------------
+    # STEP 5: Extract learned graph structure (edges only)
+    # ----------------------------------------------------
+    best_edges = best_lcn["edges"]
 
+    # ----------------------------------------------------
+    # STEP 6: Evaluate search behaviour (optimization metrics)
+    # - how good score was
+    # - how fast it converged
+    # - stability of search trajectory
+    # ----------------------------------------------------
     bic_metrics = evaluate_interval_bic(trajectory)
 
-    # SHD
+    # ----------------------------------------------------
+    # STEP 7: Structural comparison to ground truth
+    # - SHD measures edge-level structural error
+    # - edge_metrics gives precision/recall/F1 view
+    # ----------------------------------------------------
     shd = compute_shd(lcn, best_edges)
-
     edge_metrics = compute_edge_metrics(lcn, best_edges, nodes)
 
-    # KL Divergence 
+    # ----------------------------------------------------
+    # STEP 8: Fit a Bayesian Network on learned structure
+    # - converts learned edges into probabilistic model
+    # - fits CPTs using Maximum Likelihood Estimation
+    # ----------------------------------------------------
     learned_bn = DiscreteBayesianNetwork(best_edges)
     learned_bn.add_nodes_from(nodes)
     learned_bn.fit(samples_df, estimator=MaximumLikelihoodEstimator)
 
+    # ----------------------------------------------------
+    # STEP 9: Distributional evaluation
+    # - KL divergence compares learned vs true distribution
+    # ----------------------------------------------------
     kl = compute_kl(lcn, learned_bn, samples_df)
 
+    # ----------------------------------------------------
+    # STEP 10: Return full experiment results
+    # ----------------------------------------------------
     return {
         "config": {
             "size": size,
@@ -358,7 +437,8 @@ def run_experiment_steps(
             "in_degree": in_degree,
             "num_samples": num_samples,
             "search_method": search_method,
-            "mutation_type": mutation_type
+            "mutation_type": mutation_type,
+            "mutation_strategy": mutation_strategy
         },
         "structure": {
             "learned_edges": best_edges,
