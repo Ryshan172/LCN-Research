@@ -45,7 +45,7 @@ def build_constraint_index(logical_constraints):
     return index
 
 
-# ----------- 1. LCN GENERATION ------------------------------------
+# ----------- LCN GENERATION ------------------------------------
 def generate_lcn(size, interval_width, width_dist_type, in_degree):
     return create_lcn(size, interval_width, width_dist_type, in_degree)
 
@@ -59,30 +59,50 @@ def sample_lcn(lcn, num_samples):
     return samples_df, aggregate_table
 
 
-# -------- 2. INITIAL STRUCTURE -------------------------
-def initialise_structure(nodes, strategy="empty"):
+# -------- INITIAL STRUCTURE -------------------------
+def initialise_structure(
+    nodes,
+    logical_constraints=None,
+    strategy="empty"
+):
     """
     Full LCN state initialisation.
 
     IMPORTANT CHANGE:
     We now build a constraint index so locality is REAL,
     not just assumed in theory.
+
+    NEW:
+    Logical constraints can now be supplied from the
+    generated LCN.
+
+    This allows constraint-aware and repair mutations
+    to access domain knowledge while still starting
+    from an empty graph structure.
     """
 
-    logical_constraints = []
+    if logical_constraints is None:
+        logical_constraints = []
 
     return {
         "nodes": list(nodes),
+
+        # learner still starts from empty structure
         "edges": [],
+
         "credal_sets": {},
+
+        # domain knowledge supplied to learner
         "logical_constraints": logical_constraints,
 
         # locality support structure
-        "constraint_index": build_constraint_index(logical_constraints)
+        "constraint_index": build_constraint_index(
+            logical_constraints
+        )
     }
 
 
-# ----- 3. MUTATION OPERATORS ------------
+# ----- MUTATION OPERATORS ------------
 def mutate_lcn(lcn_state, strategy="standard", mutation_type="edge_add"):
     
     constraint_index = lcn_state.get("constraint_index", None)
@@ -108,7 +128,7 @@ def mutate_lcn(lcn_state, strategy="standard", mutation_type="edge_add"):
         raise ValueError(f"Unknown strategy: {strategy}")
     
 
-# -------- 4. SCORE FUNCTION ------------------
+# -------- SCORE FUNCTION ------------------
 def score_structure(lcn_state, samples_df, aggregate_table, scoring="mid"):
     """
     Scores full LCN state instead of edges only
@@ -124,11 +144,12 @@ def score_structure(lcn_state, samples_df, aggregate_table, scoring="mid"):
     return 0.0
 
 
-# -------- 5. HILL CLIMBING CORE -------------------
+# -------- HILL CLIMBING CORE -------------------
 def hill_climb(
     samples_df,
     aggregate_table,
     nodes,
+    logical_constraints=None,
     mutation_strategy="standard",
     mutation_type="edge_add",
     max_iter=100
@@ -137,7 +158,12 @@ def hill_climb(
     Standard greedy hill climbing over FULL LCN state.
     """
 
-    current = initialise_structure(nodes)
+    # Updated to pass logical constraints as well
+    current = initialise_structure(
+        nodes,
+        logical_constraints=logical_constraints
+    )
+
     current_score = score_structure(current, samples_df, aggregate_table)
 
     best = copy.deepcopy(current)
@@ -169,11 +195,12 @@ def hill_climb(
     return best, trajectory
 
 
-# ---------- 6. RANDOM RESTART ------------------------
+# ---------- RANDOM RESTART ------------------------
 def random_restart_hill_climb(
     samples_df,
     aggregate_table,
     nodes,
+    logical_constraints=None,
     mutation_type="edge_add",
     mutation_strategy="standard",
     n_restarts=10,
@@ -188,16 +215,20 @@ def random_restart_hill_climb(
     - mutation_type (edge_add / delete / flip)
     """
 
+    # NOTE: Needs to be updated like Hill Climbing (TODO Later)
+
     best_overall = None
     best_score = -np.inf
     full_trajectory = []
 
     for _ in range(n_restarts):
 
+        # Updated for updated Hill Climb
         result, traj = hill_climb(
             samples_df,
             aggregate_table,
             nodes,
+            logical_constraints=logical_constraints,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type,
             max_iter=max_iter
@@ -213,11 +244,12 @@ def random_restart_hill_climb(
     return best_overall, full_trajectory
 
 
-# ------------- 7. TABU SEARCH ------------------
+# ------------- TABU SEARCH ------------------
 def tabu_search(
     samples_df,
     aggregate_table,
     nodes,
+    logical_constraints=None,
     mutation_strategy="standard",
     mutation_type="edge_add",
     tabu_size=10,
@@ -227,7 +259,12 @@ def tabu_search(
     Tabu search over FULL LCN state.
     """
 
-    current = initialise_structure(nodes)
+    # Updated because of logical constraints 
+    current = initialise_structure(
+    nodes,
+        logical_constraints=logical_constraints
+    )
+
     current_score = score_structure(current, samples_df, aggregate_table)
 
     best = copy.deepcopy(current)
@@ -268,7 +305,7 @@ def tabu_search(
     return best, trajectory
 
 
-# ------------ 8. EVALUATION METRICS ------------------
+# ------------ EVALUATION METRICS ------------------
 def evaluate_interval_bic(trajectory):
     return {
         "best_score": max(trajectory),
@@ -323,7 +360,7 @@ def compute_kl(true_model, learned_model, samples_df):
     )
 
 
-# ---------- 9. EXPERIMENT RUNNER -------------
+# ---------- EXPERIMENT RUNNER -------------
 def run_experiment_steps(
     size,
     interval_width,
@@ -347,10 +384,26 @@ def run_experiment_steps(
     samples_df, aggregate_table = sample_lcn(lcn, num_samples)
 
     # ----------------------------------------------------
-    # STEP 3: Extract node set for structure learning
-    # (search operates over graph structure, not raw model)
+    # STEP 3: Extract information available to learner
+    #
+    # nodes:
+    #     variables over which structure learning occurs
+    #
+    # logical_constraints:
+    #     domain knowledge supplied to constraint-aware
+    #     and repair mutation strategies
+    #
+    # IMPORTANT:
+    # The learner receives logical constraints but NOT
+    # the true graph structure.
     # ----------------------------------------------------
     nodes = list(lcn.nodes())
+
+    logical_constraints = getattr(
+        lcn,
+        "logical_constraints",
+        []
+    )
 
     # ----------------------------------------------------
     # STEP 4: Run structure learning (search phase)
@@ -358,31 +411,35 @@ def run_experiment_steps(
     # - returns best learned structure + score trajectory
     # ----------------------------------------------------
     if search_method == "hill_climbing":
-
+        
+        # Hill Climbing call Including logical constraints as well
         best_lcn, trajectory = hill_climb(
             samples_df,
             aggregate_table,
             nodes,
+            logical_constraints=logical_constraints,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
 
     elif search_method == "random_restart":
-
+        # Random Restart call including Logical Constraints 
         best_lcn, trajectory = random_restart_hill_climb(
             samples_df,
             aggregate_table,
             nodes,
+            logical_constraints=logical_constraints,
             mutation_type=mutation_type,
             mutation_strategy=mutation_strategy
         )
 
     elif search_method == "tabu":
-
+        # Tabu search call with logical constraints added 
         best_lcn, trajectory = tabu_search(
             samples_df,
             aggregate_table,
             nodes,
+            logical_constraints=logical_constraints,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
