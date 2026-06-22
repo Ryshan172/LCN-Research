@@ -92,12 +92,8 @@ def extract_constraint_dependencies(logical_constraints):
     dependencies = set()
 
     for rule in logical_constraints:
-
-        antecedent_vars = rule["if"].keys()
-        consequent_vars = rule["then"].keys()
-
-        for source in antecedent_vars:
-            for target in consequent_vars:
+        for source in rule["if"].keys():
+            for target in rule["then"].keys():
                 dependencies.add((source, target))
 
     return dependencies
@@ -133,12 +129,15 @@ def affected_constraints(
 
 def local_constraint_violation(candidate_state, affected_nodes, constraint_index):
     """
-    TRUE LOCAL CONSTRAINT CHECK
+    Returns True if ANY required directed dependency edge is missing.
 
-    Complexity:
-    O(|constraints touching affected nodes|)
+    This matches your theory:
 
-    NOT O(|all constraints|)
+        (M, Θ) ⊨ C
+
+    interpreted structurally as:
+
+        required directed edges must exist in M
     """
 
     logical_constraints = candidate_state["logical_constraints"]
@@ -149,11 +148,11 @@ def local_constraint_violation(candidate_state, affected_nodes, constraint_index
         affected_nodes
     )
 
-    dependency_pairs = extract_constraint_dependencies(relevant_constraints)
+    required_edges = extract_constraint_dependencies(relevant_constraints)
 
     edge_set = set(candidate_state["edges"])
 
-    for source, target in dependency_pairs:
+    for source, target in required_edges:
         if (source, target) not in edge_set:
             return True
 
@@ -162,10 +161,10 @@ def local_constraint_violation(candidate_state, affected_nodes, constraint_index
 
 def get_relevant_constraints(constraint_index, logical_constraints, affected_nodes):
     """
-    O(1)-amortized retrieval of relevant constraints.
+    Returns only constraints touching affected nodes.
 
-    Instead of scanning ALL constraints:
-    we directly jump via precomputed index.
+    Complexity assumption:
+        O(1)-amortised via index lookup
     """
 
     relevant_ids = set()
@@ -177,11 +176,9 @@ def get_relevant_constraints(constraint_index, logical_constraints, affected_nod
     return [logical_constraints[i] for i in relevant_ids]
 
 
+
 #--------------- Mutation Functions------------------------------------
 def standard_mutation(lcn_state, mutation_type="edge_add", max_attempts=10):
-    """
-    Pure structural mutation (NO constraints).
-    """
 
     nodes = lcn_state["nodes"]
     edges = copy.deepcopy(lcn_state["edges"])
@@ -196,15 +193,21 @@ def standard_mutation(lcn_state, mutation_type="edge_add", max_attempts=10):
             if (a, b) not in candidate_edges:
                 candidate_edges.append((a, b))
 
-        elif mutation_type == "edge_delete":
-            if candidate_edges:
-                candidate_edges.pop(random.randint(0, len(candidate_edges) - 1))
+            affected_nodes = {a, b}
 
-        elif mutation_type == "edge_flip":
-            if candidate_edges:
-                i = random.randint(0, len(candidate_edges) - 1)
-                a, b = candidate_edges[i]
-                candidate_edges[i] = (b, a)
+        elif mutation_type == "edge_delete" and candidate_edges:
+            a, b = random.choice(candidate_edges)
+            candidate_edges.remove((a, b))
+            affected_nodes = {a, b}
+
+        elif mutation_type == "edge_flip" and candidate_edges:
+            i = random.randint(0, len(candidate_edges) - 1)
+            a, b = candidate_edges[i]
+            candidate_edges[i] = (b, a)
+            affected_nodes = {a, b}
+
+        else:
+            return lcn_state
 
         candidate = copy.deepcopy(lcn_state)
         candidate["edges"] = candidate_edges
@@ -215,7 +218,7 @@ def standard_mutation(lcn_state, mutation_type="edge_add", max_attempts=10):
 
 
 
-def contraint_aware_mutation(
+def constraint_aware_mutation(
     lcn_state,
     constraint_index,
     mutation_type="edge_add",
@@ -262,10 +265,12 @@ def contraint_aware_mutation(
             candidate_edges[i] = (b, a)
             affected_nodes = {a, b}
 
+        else:
+            continue
+
         candidate = copy.deepcopy(lcn_state)
         candidate["edges"] = candidate_edges
 
-        # TRUE LOCALITY CHECK (now O(1)-amortized)
         if not local_constraint_violation(candidate, affected_nodes, constraint_index):
             return candidate, {"affected_nodes": affected_nodes}
 
@@ -289,10 +294,7 @@ def post_mutation_contraint_repair(
     4. Repair only missing dependency edges
     """
 
-    # -----------------------------------
-    # STEP 1: mutation (local footprint produced here)
-    # -----------------------------------
-    candidate, meta = contraint_aware_mutation(
+    candidate, meta = constraint_aware_mutation(
         lcn_state,
         constraint_index,
         mutation_type,
@@ -307,9 +309,8 @@ def post_mutation_contraint_repair(
 
     edge_set = set(candidate["edges"])
 
-    # -----------------------------------
+
     # STEP 2: local repair loop
-    # -----------------------------------
     for _ in range(max_repairs):
 
         # TRUE LOCAL CHECK (index-based only)
@@ -320,18 +321,14 @@ def post_mutation_contraint_repair(
         # only index-based retrieval (no full scan ever)
         relevant_constraints = get_relevant_constraints(
             constraint_index,
-            candidate["logical_constraints"],   # safe: just lookup list
+            candidate["logical_constraints"],
             affected_nodes
         )
 
-        dependency_pairs = extract_constraint_dependencies(relevant_constraints)
+        required_edges = extract_constraint_dependencies(relevant_constraints)
 
-        # -----------------------------------
-        # STEP 3: minimal structural repair
-        # -----------------------------------
-        for source, target in dependency_pairs:
+        for source, target in required_edges:
 
-            # enforce only missing dependency edges
             if (source, target) not in edge_set:
                 candidate["edges"].append((source, target))
                 edge_set.add((source, target))
