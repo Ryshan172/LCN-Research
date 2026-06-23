@@ -159,7 +159,11 @@ def local_constraint_violation(candidate_state, affected_nodes, constraint_index
     return False
 
 
-def get_relevant_constraints(constraint_index, logical_constraints, affected_nodes):
+def get_relevant_constraints(
+    constraint_index,
+    logical_constraints,
+    affected_nodes
+):
     """
     Returns only constraints touching affected nodes.
 
@@ -167,13 +171,28 @@ def get_relevant_constraints(constraint_index, logical_constraints, affected_nod
         O(1)-amortised via index lookup
     """
 
-    relevant_ids = set()
+    relevant_constraints = []
 
     for v in affected_nodes:
-        if v in constraint_index:
-            relevant_ids |= constraint_index[v]
 
-    return [logical_constraints[i] for i in relevant_ids]
+        if v in constraint_index:
+            relevant_constraints.extend(
+                constraint_index[v]
+            )
+
+    # remove duplicates
+    unique_constraints = []
+    seen = set()
+
+    for rule in relevant_constraints:
+
+        rule_id = id(rule)
+
+        if rule_id not in seen:
+            seen.add(rule_id)
+            unique_constraints.append(rule)
+
+    return unique_constraints
 
 
 
@@ -250,19 +269,33 @@ def constraint_aware_mutation(
         candidate_edges = copy.deepcopy(edges)
 
         if mutation_type == "edge_add":
+
             a, b = random.sample(nodes, 2)
+
+            if (a, b) in candidate_edges:
+                continue
+
             candidate_edges.append((a, b))
             affected_nodes = {a, b}
 
         elif mutation_type == "edge_delete" and candidate_edges:
+
             a, b = random.choice(candidate_edges)
+
             candidate_edges.remove((a, b))
             affected_nodes = {a, b}
 
         elif mutation_type == "edge_flip" and candidate_edges:
-            i = random.randint(0, len(candidate_edges) - 1)
+
+            i = random.randint(
+                0,
+                len(candidate_edges) - 1
+            )
+
             a, b = candidate_edges[i]
+
             candidate_edges[i] = (b, a)
+
             affected_nodes = {a, b}
 
         else:
@@ -271,10 +304,14 @@ def constraint_aware_mutation(
         candidate = copy.deepcopy(lcn_state)
         candidate["edges"] = candidate_edges
 
-        if not local_constraint_violation(candidate, affected_nodes, constraint_index):
-            return candidate, {"affected_nodes": affected_nodes}
+        if not local_constraint_violation(
+            candidate,
+            affected_nodes,
+            constraint_index
+        ):
+            return candidate
 
-    return lcn_state, {"affected_nodes": set()}
+    return lcn_state
 
 
 def post_mutation_contraint_repair(
@@ -285,52 +322,76 @@ def post_mutation_contraint_repair(
     max_repairs=3
 ):
     """
-    POST-MUTATION REPAIR (STRICT LOCALITY VERSION)
+    POST-MUTATION REPAIR
 
     Pipeline:
-    1. Apply mutation (standard or constraint-aware)
-    2. Identify affected nodes (local footprint only)
-    3. Query constraints ONLY via precomputed index
-    4. Repair only missing dependency edges
+    1. Apply mutation
+    2. Identify local footprint
+    3. Retrieve locally relevant constraints
+    4. Repair missing dependency edges
     """
 
-    candidate, meta = constraint_aware_mutation(
+    candidate = standard_mutation(
         lcn_state,
-        constraint_index,
         mutation_type,
         max_attempts
     )
 
-    affected_nodes = meta["affected_nodes"]
+    original_edges = set(lcn_state["edges"])
+    candidate_edges = set(candidate["edges"])
 
-    # No affected region → no repair needed
+    changed_edges = (
+        original_edges
+        .symmetric_difference(candidate_edges)
+    )
+
+    affected_nodes = set()
+
+    for a, b in changed_edges:
+        affected_nodes.add(a)
+        affected_nodes.add(b)
+
     if not affected_nodes:
         return candidate
 
     edge_set = set(candidate["edges"])
 
-
-    # STEP 2: local repair loop
     for _ in range(max_repairs):
 
-        # TRUE LOCAL CHECK (index-based only)
-        if not local_constraint_violation(candidate, affected_nodes, constraint_index):
+        if not local_constraint_violation(
+            candidate,
+            affected_nodes,
+            constraint_index
+        ):
             return candidate
 
-        # IMPORTANT:
-        # only index-based retrieval (no full scan ever)
         relevant_constraints = get_relevant_constraints(
             constraint_index,
             candidate["logical_constraints"],
             affected_nodes
         )
 
-        required_edges = extract_constraint_dependencies(relevant_constraints)
+        required_edges = extract_constraint_dependencies(
+            relevant_constraints
+        )
+
+        repaired = False
 
         for source, target in required_edges:
 
             if (source, target) not in edge_set:
-                candidate["edges"].append((source, target))
-                edge_set.add((source, target))
+
+                candidate["edges"].append(
+                    (source, target)
+                )
+
+                edge_set.add(
+                    (source, target)
+                )
+
+                repaired = True
+
+        if not repaired:
+            break
 
     return candidate

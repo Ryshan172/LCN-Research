@@ -4,12 +4,14 @@ import numpy as np
 import copy
 
 from lcn_functions.model import create_lcn
-from mutations.mutation_functions import standard_mutation, contraint_aware_mutation, post_mutation_contraint_repair
+from mutations.mutation_functions import standard_mutation, constraint_aware_mutation, post_mutation_contraint_repair
 from sampler_functions.contingency_sampler import sample_dataset, credal_aggregate_intervals
 from metric_functions.structural_hamming_distance import structural_hamming_distance_compare
 from metric_functions.kl_divergence import kl_divergence_from_samples
 from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.estimators import MaximumLikelihoodEstimator
+
+from utils.data_saving import save_experiment_to_json
 
 
 """
@@ -111,7 +113,7 @@ def mutate_lcn(lcn_state, strategy="standard", mutation_type="edge_add"):
         return standard_mutation(lcn_state, mutation_type)
 
     elif strategy == "constraint":
-        return contraint_aware_mutation(
+        return constraint_aware_mutation(
             lcn_state,
             constraint_index,
             mutation_type
@@ -506,3 +508,86 @@ def run_experiment_steps(
         "interval_bic": bic_metrics,
         "trajectory": trajectory
     }
+
+
+def experiment_run_variants_simple():
+
+    # -----------------------------
+    # FIXED PARAMETERS
+    # -----------------------------
+    interval_width = 0.3
+    width_dist_type = "uniform"
+    in_degree = 2
+    num_samples = 200
+
+    mutation_type = "edge_add"
+    search_method = "hill_climbing"
+
+    # -----------------------------
+    # VARIABLES OF INTEREST
+    # -----------------------------
+    sizes = [5, 7, 9]
+
+    mutation_strategies = [
+        "standard",
+        "constraint",
+        "repair"
+    ]
+
+    runs_per_config = 10
+
+    run_counter = 1
+    all_experiments = []
+
+    # -----------------------------
+    # GRID
+    # -----------------------------
+    for size, mutation_strategy in itertools.product(
+        sizes,
+        mutation_strategies
+    ):
+
+        for repeat_idx in range(runs_per_config):
+
+            print(
+                f"Run {run_counter} | "
+                f"size={size}, strategy={mutation_strategy}, "
+                f"repeat={repeat_idx + 1}"
+            )
+
+            results = run_experiment_steps(
+                size=size,
+                interval_width=interval_width,
+                width_dist_type=width_dist_type,
+                in_degree=in_degree,
+                num_samples=num_samples,
+                search_method=search_method,
+                mutation_type=mutation_type,
+                mutation_strategy=mutation_strategy
+            )
+
+            experiment_obj = {
+                "run_id": run_counter,
+                "repeat": repeat_idx + 1,
+                "params": {
+                    "size": size,
+                    "interval_width": interval_width,
+                    "width_dist_type": width_dist_type,
+                    "in_degree": in_degree,
+                    "num_samples": num_samples,
+                    "mutation_type": mutation_type,
+                    "mutation_strategy": mutation_strategy,
+                    "search_method": search_method
+                },
+                "results": results
+            }
+
+            save_experiment_to_json(experiment_obj, f"run_{run_counter}", "results_rq2")
+
+            all_experiments.append(experiment_obj)
+            run_counter += 1
+
+    return all_experiments
+
+
+# TODO: Shouldn't just do one mutation type (maybe see if it can be made random)
