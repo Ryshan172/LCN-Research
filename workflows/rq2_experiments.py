@@ -510,22 +510,46 @@ def run_experiment_steps(
     }
 
 
-def experiment_run_variants_simple():
 
-    # -----------------------------
+"""
+This experiment uses a factorial design over:
+    - network size
+    - mutation strategy (standard, constraint, repair)
+
+The mutation type (edge_add, edge_delete, edge_reverse)
+is intentionally NOT included in the full grid to avoid
+combinatorial explosion in the number of runs.
+
+Instead, mutation types are STRATIFIED within each
+(size, mutation_strategy) configuration using a
+round-robin scheme:
+
+    mutation_type = mutation_types[repeat_idx % len(...)]
+
+This ensures:
+    - balanced coverage of all mutation operators
+    - no bias toward a single mutation type
+    - controlled stochastic variation without increasing
+      the total number of experiments
+
+In this setup, mutation_type is treated as a controlled
+nuisance factor, while size and mutation_strategy are
+the primary experimental variables of interest.
+
+Less variability with LCNs because mutations strategies are what 
+are really being tested
+"""
+def rq2_experiment_run_variants_simple():
+
     # FIXED PARAMETERS
-    # -----------------------------
     interval_width = 0.3
     width_dist_type = "uniform"
     in_degree = 2
     num_samples = 200
 
-    mutation_type = "edge_add"
     search_method = "hill_climbing"
 
-    # -----------------------------
     # VARIABLES OF INTEREST
-    # -----------------------------
     sizes = [5, 7, 9]
 
     mutation_strategies = [
@@ -534,24 +558,34 @@ def experiment_run_variants_simple():
         "repair"
     ]
 
+    mutation_types = [
+        "edge_add",
+        "edge_delete",
+        "edge_reverse"
+    ]
+
     runs_per_config = 10
 
     run_counter = 1
     all_experiments = []
 
-    # -----------------------------
     # GRID
-    # -----------------------------
     for size, mutation_strategy in itertools.product(
         sizes,
         mutation_strategies
     ):
 
+        # stratified cycle of mutation types per config
         for repeat_idx in range(runs_per_config):
+
+            mutation_type = mutation_types[
+                repeat_idx % len(mutation_types)
+            ]
 
             print(
                 f"Run {run_counter} | "
                 f"size={size}, strategy={mutation_strategy}, "
+                f"mutation={mutation_type}, "
                 f"repeat={repeat_idx + 1}"
             )
 
@@ -582,12 +616,13 @@ def experiment_run_variants_simple():
                 "results": results
             }
 
-            save_experiment_to_json(experiment_obj, f"run_{run_counter}", "results_rq2")
+            save_experiment_to_json(
+                experiment_obj,
+                f"rq2_run_{run_counter}",
+                "results_rq2"
+            )
 
-            all_experiments.append(experiment_obj)
+            # all_experiments.append(experiment_obj)
             run_counter += 1
 
-    return all_experiments
-
-
-# TODO: Shouldn't just do one mutation type (maybe see if it can be made random)
+    # return all_experiments
