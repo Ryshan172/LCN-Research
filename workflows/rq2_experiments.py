@@ -11,6 +11,8 @@ from metric_functions.kl_divergence import kl_divergence_from_samples
 from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.estimators import MaximumLikelihoodEstimator
 
+from scoring_functions.interval_bic_derivation import compute_interval_BIC
+from scoring_functions.scoring_helpers import regroup_for_parents
 from utils.data_saving import save_experiment_to_json
 
 
@@ -131,19 +133,61 @@ def mutate_lcn(lcn_state, strategy="standard", mutation_type="edge_add"):
     
 
 # -------- SCORE FUNCTION ------------------
-def score_structure(lcn_state, samples_df, aggregate_table, scoring="mid"):
+def score_structure(
+    lcn_state,
+    samples_df,
+    aggregate_table,
+    scoring="mid"
+):
     """
-    Scores full LCN state instead of edges only
+    Structure-aware interval BIC score.
 
-    Why:
-    - interval BIC depends on structure + credal interpretation
-    - future constraint-aware scoring will require full LCN
+    Equivalent to the pgmpy IntervalBICScore,
+    but for the custom LCN hill climber.
     """
 
+    total_score = 0.0
+
+    nodes = lcn_state["nodes"]
     edges = lcn_state["edges"]
 
-    # TODO: replace with Interval BIC implementation
-    return 0.0
+    for node in nodes:
+
+        parents = [
+            parent
+            for parent, child in edges
+            if child == node
+        ]
+
+        df_regrouped = regroup_for_parents(
+            aggregate_table,
+            node,
+            parents
+        )
+
+        interval_bic = compute_interval_BIC(
+            df_regrouped
+        )
+
+        bic_lower, bic_upper = interval_bic[node]
+
+        if scoring == "low":
+            score = bic_lower
+
+        elif scoring == "high":
+            score = bic_upper
+
+        elif scoring == "mid":
+            score = (bic_lower + bic_upper) / 2
+
+        else:
+            raise ValueError(
+                "scoring must be 'low', 'mid', or 'high'"
+            )
+
+        total_score += float(score)
+
+    return total_score
 
 
 # -------- HILL CLIMBING CORE -------------------
@@ -377,6 +421,7 @@ def run_experiment_steps(
     # STEP 1: Generate a ground-truth LCN (data-generating model)
     # ----------------------------------------------------
     lcn = generate_lcn(size, interval_width, width_dist_type, in_degree)
+    print("DONE 1")
 
     # ----------------------------------------------------
     # STEP 2: Sample data from the LCN
@@ -384,6 +429,7 @@ def run_experiment_steps(
     # - produces interval/credal aggregation statistics
     # ----------------------------------------------------
     samples_df, aggregate_table = sample_lcn(lcn, num_samples)
+    print("DONE 2")
 
     # ----------------------------------------------------
     # STEP 3: Extract information available to learner
@@ -399,13 +445,16 @@ def run_experiment_steps(
     # The learner receives logical constraints but NOT
     # the true graph structure.
     # ----------------------------------------------------
-    nodes = list(lcn.nodes())
+    # nodes = list(lcn.nodes())
+    nodes = lcn["nodes"]
 
     logical_constraints = getattr(
         lcn,
         "logical_constraints",
         []
     )
+
+    print("DONE 3")
 
     # ----------------------------------------------------
     # STEP 4: Run structure learning (search phase)
@@ -423,6 +472,8 @@ def run_experiment_steps(
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
+
+        print("DONE 4")
 
     elif search_method == "random_restart":
         # Random Restart call including Logical Constraints 
@@ -453,6 +504,7 @@ def run_experiment_steps(
     # STEP 5: Extract learned graph structure (edges only)
     # ----------------------------------------------------
     best_edges = best_lcn["edges"]
+    print("DONE 5")
 
     # ----------------------------------------------------
     # STEP 6: Evaluate search behaviour (optimization metrics)
@@ -461,6 +513,7 @@ def run_experiment_steps(
     # - stability of search trajectory
     # ----------------------------------------------------
     bic_metrics = evaluate_interval_bic(trajectory)
+    print("DONE 6")
 
     # ----------------------------------------------------
     # STEP 7: Structural comparison to ground truth
@@ -626,3 +679,11 @@ def rq2_experiment_run_variants_simple():
             run_counter += 1
 
     # return all_experiments
+
+
+"""
+CHECK
+- mutations cannot create cycles,
+- delete/reverse mutations behave sensibly from an empty graph,
+- regroup_for_parents() truly reproduces the same regrouping used in the original
+"""
