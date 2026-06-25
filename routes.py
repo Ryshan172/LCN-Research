@@ -18,7 +18,7 @@ from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 from workflows.application_workflow import run_application_workflow, summarise_application_results
 from workflows.med_data_workflow import run_medical_experiments
 from workflows.rq1_experiments import experiment_run_controller, experiment_run_variants
-from workflows.rq2_experiments import rq2_experiment_run_variants_simple
+from workflows.rq2_experiments import rq2_experiment_run_variants_simple, summarise_rq2_results
 
 router = APIRouter()
 
@@ -323,4 +323,20 @@ def run_rq2_experiments():
         raise HTTPException(
             status_code=500,
             detail=f"Error running experiments: {e}"
+        )
+
+@router.post("/summarise-rq2-results")
+def summarise_rq2_experiment_results():
+    try:
+
+        summarise_rq2_results()
+
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error summarising experiments: {e}"
         )

@@ -3,6 +3,10 @@ import itertools
 import numpy as np
 import copy
 
+import os
+import json
+import pandas as pd
+
 from lcn_functions.model import create_lcn
 from mutations.mutation_functions import standard_mutation, constraint_aware_mutation, post_mutation_contraint_repair
 from sampler_functions.contingency_sampler import sample_dataset, credal_aggregate_intervals
@@ -716,3 +720,97 @@ CHECK
 - delete/reverse mutations behave sensibly from an empty graph,
 - regroup_for_parents() truly reproduces the same regrouping used in the original
 """
+
+
+def summarise_rq2_results(
+    results_dir="results_rq2",
+    output_csv="rq2_results_summary.csv"
+):
+    """
+    Reads interval learning experiment JSON files and summarises into a CSV.
+
+    Output columns include:
+    run_id, repeat, params,
+    edge metrics (precision, recall, accuracy, f1),
+    structure metrics (SHD, missing, extra, orientation errors),
+    scoring metrics (KL divergence, IBIC stats),
+    trajectory summary stats.
+    """
+
+    rows = []
+
+    for file in os.listdir(results_dir):
+        if not file.endswith(".json"):
+            continue
+
+        file_path = os.path.join(results_dir, file)
+
+        with open(file_path, "r") as f:
+            data = json.load(f)
+
+        params = data.get("params", {})
+        results = data.get("results", {})
+        structure = results.get("structure", {})
+        edge_metrics = results.get("edge_metrics", {})
+        shd = structure.get("shd", {})
+        ibic = results.get("interval_bic", {})
+        trajectory = results.get("trajectory", [])
+
+        # trajectory summaries
+        traj_final = trajectory[-1] if trajectory else None
+        traj_max = max(trajectory) if trajectory else None
+        traj_len = len(trajectory)
+
+        row = {
+            # identifiers
+            "run_id": data.get("run_id"),
+            "repeat": data.get("repeat"),
+
+            # experiment params
+            "size": params.get("size"),
+            "interval_width": params.get("interval_width"),
+            "width_dist_type": params.get("width_dist_type"),
+            "in_degree": params.get("in_degree"),
+            "num_samples": params.get("num_samples"),
+            "mutation_type": params.get("mutation_type"),
+            "mutation_strategy": params.get("mutation_strategy"),
+            "search_method": params.get("search_method"),
+
+            # edge performance
+            "precision": edge_metrics.get("precision"),
+            "recall": edge_metrics.get("recall"),
+            "accuracy": edge_metrics.get("accuracy"),
+            "f1": edge_metrics.get("f1"),
+
+            # structure error metrics
+            "shd": shd.get("shd"),
+            "missing_edges": len(shd.get("missing", [])),
+            "extra_edges": len(shd.get("extra", [])),
+            "orientation_errors": shd.get("orientation_errors"),
+
+            # probabilistic / scoring metrics
+            "kl_divergence": results.get("kl_divergence"),
+            "ibic_best_score": ibic.get("best_score"),
+            "ibic_convergence_speed": ibic.get("convergence_speed"),
+            "ibic_stability": ibic.get("stability"),
+
+            # trajectory summaries
+            "trajectory_len": traj_len,
+            "trajectory_final": traj_final,
+            "trajectory_max": traj_max,
+        }
+
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+
+    df = df.sort_values(
+        by=["size", "interval_width", "num_samples", "run_id", "repeat"]
+    ).reset_index(drop=True)
+
+    df.to_csv(output_csv, index=False)
+
+    print(f"Saved summary to: {output_csv}")
+    print(df.head())
+
+    return df
