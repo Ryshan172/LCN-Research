@@ -361,15 +361,31 @@ def evaluate_interval_bic(trajectory):
 
 
 def compute_shd(true_model, learned_edges):
+    """
+    Converts your ground-truth LCN from a dictionary containing an "edges" list 
+    into the edge-list format that the SHD function expects, instead of incorrectly 
+    treating the dictionary as a graph object with an .edges() method.
+    """
+    true_edges = [
+        tuple(edge)
+        for edge in true_model["edges"]
+    ]
+
     return structural_hamming_distance_compare(
-        list(true_model.edges()),
-        list(learned_edges)
+        true_edges,
+        learned_edges
     )
 
 
 def compute_edge_metrics(true_model, learned_edges, nodes):
+    """
+    Ground-truth LCN is represented as:
+    {"nodes": [...], "edges": [[parent, child], ...]}
+    Convert edge lists to tuples for set-based metric calculations.
+    true_edges = set(map(tuple, true_model["edges"]))
+    """
 
-    true_edges = set(true_model.edges())
+    true_edges = set(map(tuple, true_model["edges"]))
     learned_edges = set(learned_edges)
 
     all_possible = {
@@ -421,7 +437,6 @@ def run_experiment_steps(
     # STEP 1: Generate a ground-truth LCN (data-generating model)
     # ----------------------------------------------------
     lcn = generate_lcn(size, interval_width, width_dist_type, in_degree)
-    print("DONE 1")
 
     # ----------------------------------------------------
     # STEP 2: Sample data from the LCN
@@ -429,7 +444,6 @@ def run_experiment_steps(
     # - produces interval/credal aggregation statistics
     # ----------------------------------------------------
     samples_df, aggregate_table = sample_lcn(lcn, num_samples)
-    print("DONE 2")
 
     # ----------------------------------------------------
     # STEP 3: Extract information available to learner
@@ -441,7 +455,6 @@ def run_experiment_steps(
     #     domain knowledge supplied to constraint-aware
     #     and repair mutation strategies
     #
-    # IMPORTANT:
     # The learner receives logical constraints but NOT
     # the true graph structure.
     # ----------------------------------------------------
@@ -453,8 +466,6 @@ def run_experiment_steps(
         "logical_constraints",
         []
     )
-
-    print("DONE 3")
 
     # ----------------------------------------------------
     # STEP 4: Run structure learning (search phase)
@@ -504,7 +515,6 @@ def run_experiment_steps(
     # STEP 5: Extract learned graph structure (edges only)
     # ----------------------------------------------------
     best_edges = best_lcn["edges"]
-    print("DONE 5")
 
     # ----------------------------------------------------
     # STEP 6: Evaluate search behaviour (optimization metrics)
@@ -513,7 +523,6 @@ def run_experiment_steps(
     # - stability of search trajectory
     # ----------------------------------------------------
     bic_metrics = evaluate_interval_bic(trajectory)
-    print("DONE 6")
 
     # ----------------------------------------------------
     # STEP 7: Structural comparison to ground truth
@@ -521,7 +530,9 @@ def run_experiment_steps(
     # - edge_metrics gives precision/recall/F1 view
     # ----------------------------------------------------
     shd = compute_shd(lcn, best_edges)
+    print("DONE 6.5")
     edge_metrics = compute_edge_metrics(lcn, best_edges, nodes)
+    print("DONE 7")
 
     # ----------------------------------------------------
     # STEP 8: Fit a Bayesian Network on learned structure
@@ -532,11 +543,29 @@ def run_experiment_steps(
     learned_bn.add_nodes_from(nodes)
     learned_bn.fit(samples_df, estimator=MaximumLikelihoodEstimator)
 
+    print("DONE 8")
+
     # ----------------------------------------------------
-    # STEP 9: Distributional evaluation
-    # - KL divergence compares learned vs true distribution
+    # STEP 9: Distributional evaluation (VALID KL SETUP)
     # ----------------------------------------------------
-    kl = compute_kl(lcn, learned_bn, samples_df)
+    # For KL computation, both models must be in pgmpy BN format
+    # (i.e., support get_cpds()).
+    #
+    # Converting the LCN-induced samples into a pgmpy BayesianNetwork
+    # using MLE parameter fitting, enabling a valid comparison.
+    #
+    # KL is computed between:
+    #   P = BN fitted to LCN-generated samples
+    #   Q = learned BN
+    # ----------------------------------------------------
+
+    true_bn = DiscreteBayesianNetwork(lcn["edges"])
+    true_bn.add_nodes_from(nodes)
+
+    # Fit CPDs from LCN-generated samples (empirical projection of LCN)
+    true_bn.fit(samples_df, estimator=MaximumLikelihoodEstimator)
+
+    kl = compute_kl(true_bn, learned_bn, samples_df)
 
     # ----------------------------------------------------
     # STEP 10: Return full experiment results
