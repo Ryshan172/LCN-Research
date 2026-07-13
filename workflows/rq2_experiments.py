@@ -630,13 +630,14 @@ def rq2_experiment_run_variants_simple():
     # FIXED PARAMETERS
     interval_width = 0.3
     width_dist_type = "uniform"
-    in_degree = 2
     num_samples = 200
 
     search_method = "hill_climbing"
 
     # VARIABLES OF INTEREST
     sizes = [5, 7, 9]
+
+    in_degrees = [1, 2, 3, 4, 5]
 
     mutation_strategies = [
         "standard",
@@ -656,12 +657,13 @@ def rq2_experiment_run_variants_simple():
     all_experiments = []
 
     # GRID
-    for size, mutation_strategy in itertools.product(
+    for size, in_degree, mutation_strategy in itertools.product(
         sizes,
+        in_degrees,
         mutation_strategies
     ):
 
-        # stratified cycle of mutation types per config
+        # stratified cycle of mutation types per configuration
         for repeat_idx in range(runs_per_config):
 
             mutation_type = mutation_types[
@@ -670,7 +672,9 @@ def rq2_experiment_run_variants_simple():
 
             print(
                 f"Run {run_counter} | "
-                f"size={size}, strategy={mutation_strategy}, "
+                f"size={size}, "
+                f"in_degree={in_degree}, "
+                f"strategy={mutation_strategy}, "
                 f"mutation={mutation_type}, "
                 f"repeat={repeat_idx + 1}"
             )
@@ -712,7 +716,6 @@ def rq2_experiment_run_variants_simple():
             run_counter += 1
 
     # return all_experiments
-
 
 """
 CHECK
