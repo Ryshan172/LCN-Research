@@ -279,5 +279,5 @@ def rq2_med_experiments_variation_run():
 
 
 def generate_med_test_lcn():
-    lcn = generate_and_save_lcn("medical_data.csv","rq2_med_lcns")
+    lcn = generate_and_save_lcn("medical_data.csv","rq2_med_lcns.json")
     print("done")
