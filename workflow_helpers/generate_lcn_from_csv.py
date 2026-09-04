@@ -1043,18 +1043,25 @@ def _select_lcn_columns(
 
 def _filter_semantic_constraints_for_nodes(
     nodes,
+    edges,
     feature_metadata,
     semantic_constraints,
 ):
     """
-    Keep only semantic constraints whose referenced features are
-    present in the generated LCN.
+    Keep only semantic constraints that can actually be represented
+    by the generated LCN.
 
-    Constraints involving variables excluded by the requested LCN
-    size are skipped.
+    A constraint
 
-    This is important when, for example, the CSV contains X1-X14
-    but size=10.
+        IF parent=value THEN child=value
+
+    is representable only when:
+        1. both variables are present in the LCN, and
+        2. (parent, child) is an actual DAG edge.
+
+    This is important because logical constraints are enforced through
+    the CPT of the THEN node. Therefore the IF variable must be a
+    parent of that node.
     """
 
     if (
@@ -1071,6 +1078,12 @@ def _filter_semantic_constraints_for_nodes(
         if node in feature_metadata
     }
 
+    # Actual directed relationships available to CPTs.
+    edge_set = {
+        (parent, child)
+        for parent, child in edges
+    }
+
     filtered_constraints = []
 
     for rule in semantic_constraints:
@@ -1080,25 +1093,184 @@ def _filter_semantic_constraints_for_nodes(
                 "Each semantic constraint must contain 'if' and 'then'."
             )
 
+        semantic_if = rule["if"]
+        semantic_then = rule["then"]
+
         referenced_features = (
-            set(rule["if"].keys())
-            | set(rule["then"].keys())
+            set(semantic_if.keys())
+            | set(semantic_then.keys())
         )
 
         # ---------------------------------------------------------
-        # If the rule refers to a feature that isn't part of the
-        # requested LCN, it cannot be represented in this LCN.
+        # 1. Remove constraints involving variables outside this LCN.
         # ---------------------------------------------------------
         if not referenced_features.issubset(
             selected_semantic_names
         ):
             continue
 
-        filtered_constraints.append(
-            rule
-        )
+        # ---------------------------------------------------------
+        # 2. Current LCN representation supports one IF variable
+        #    and one THEN variable.
+        # ---------------------------------------------------------
+        if len(semantic_if) != 1 or len(semantic_then) != 1:
+            continue
+
+        if_feature = next(iter(semantic_if))
+        then_feature = next(iter(semantic_then))
+
+        # ---------------------------------------------------------
+        # 3. Translate semantic names -> X1, X2, ...
+        # ---------------------------------------------------------
+        semantic_to_column = {
+            metadata["name"]: column
+            for column, metadata in feature_metadata.items()
+            if column in selected_nodes
+        }
+
+        if (
+            if_feature not in semantic_to_column
+            or then_feature not in semantic_to_column
+        ):
+            continue
+
+        if_node = semantic_to_column[if_feature]
+        then_node = semantic_to_column[then_feature]
+
+        # ---------------------------------------------------------
+        # 4. CRITICAL:
+        #    The IF node must actually be a parent of the THEN node.
+        #
+        #    Otherwise there is no CPT configuration in which this
+        #    constraint can be represented.
+        # ---------------------------------------------------------
+        if (if_node, then_node) not in edge_set:
+            continue
+
+        # Keep the original semantic rule. It will be translated
+        # later by generate_semantic_constraints().
+        filtered_constraints.append(rule)
 
     return filtered_constraints
+
+
+def _apply_logical_constraints_to_credal_sets(
+    credal_sets,
+    edges,
+    logical_constraints,
+):
+    """
+    Apply logical constraints directly to the CPT/credal sets.
+
+    For example:
+
+        {"if": {"X2": True}, "then": {"X3": True}}
+
+    requires X2 to be a parent of X3 and forces the relevant X3
+    CPT configurations to:
+
+        True  -> [1.0, 1.0]
+        False -> [0.0, 0.0]
+
+    If the IF variable is not a parent of the THEN node, the
+    constraint cannot be represented in this LCN and is rejected.
+
+    Multiple IF variables are supported as long as all of them are
+    parents of the THEN node.
+    """
+
+    edge_set = {
+        (parent, child)
+        for parent, child in edges
+    }
+
+    for constraint in logical_constraints:
+
+        if "if" not in constraint or "then" not in constraint:
+            raise ValueError(
+                f"Invalid logical constraint: {constraint}"
+            )
+
+        if_conditions = constraint["if"]
+        then_conditions = constraint["then"]
+
+        if len(then_conditions) != 1:
+            raise ValueError(
+                "Each logical constraint must contain exactly "
+                "one THEN node."
+            )
+
+        then_node, then_value = next(
+            iter(then_conditions.items())
+        )
+
+        # ---------------------------------------------------------
+        # Verify that every IF variable is a parent of THEN.
+        # ---------------------------------------------------------
+        for if_node in if_conditions:
+            if (if_node, then_node) not in edge_set:
+                raise ValueError(
+                    f"Cannot apply logical constraint "
+                    f"{if_conditions} -> {then_conditions}: "
+                    f"{if_node} is not a parent of {then_node}."
+                )
+
+        if then_node not in credal_sets:
+            raise ValueError(
+                f"THEN node '{then_node}' has no credal set."
+            )
+
+        cpts = credal_sets[then_node]
+
+        # ---------------------------------------------------------
+        # Apply the constraint to every CPT configuration whose
+        # parent assignment satisfies the IF condition.
+        # ---------------------------------------------------------
+        for cond_key, probabilities in cpts.items():
+
+            # Root node cannot satisfy a conditional constraint.
+            if cond_key == "[]":
+                continue
+
+            # Parse:
+            #
+            # [X1=True, X2=False]
+            #
+            # into:
+            #
+            # {"X1": True, "X2": False}
+            parsed_assignment = {}
+
+            inner = cond_key.strip("[]").strip()
+
+            if inner:
+                for item in inner.split(","):
+                    name, value = item.strip().split("=")
+                    parsed_assignment[name.strip()] = (
+                        value.strip() == "True"
+                    )
+
+            # Check whether this CPT configuration satisfies
+            # the IF side of the constraint.
+            matches = all(
+                parsed_assignment.get(if_node) == bool(if_value)
+                for if_node, if_value in if_conditions.items()
+            )
+
+            if not matches:
+                continue
+
+            # -----------------------------------------------------
+            # Force THEN probability.
+            # -----------------------------------------------------
+            if bool(then_value):
+                probabilities["True"] = [1.0, 1.0]
+                probabilities["False"] = [0.0, 0.0]
+            else:
+                probabilities["True"] = [0.0, 0.0]
+                probabilities["False"] = [1.0, 1.0]
+
+    return credal_sets
 
 
 # Separates one generation attempt from the retry logic.
@@ -1117,24 +1289,37 @@ def _generate_csv_candidate(
     """
     Generate one candidate LCN containing exactly `size` nodes.
 
-    The full CSV may contain more variables than the requested LCN
-    size. Only the first `size` columns are used.
+    The generated LCN satisfies the invariant:
+
+        logical constraint
+            ↓
+        corresponding DAG edge
+            ↓
+        corresponding CPT configuration
+            ↓
+        exact probability interval
+
+    This is the structure expected by the downstream LCN workflow.
     """
 
     # -------------------------------------------------------------
-    # Select exactly `size` variables.
+    # 1. Select exactly `size` variables.
     # -------------------------------------------------------------
     lcn_df = _select_lcn_columns(
         df=df,
         size=size,
     )
 
-    nodes = list(
-        lcn_df.columns
+    nodes = list(lcn_df.columns)
+
+    # Create subset of metadata for specific size
+    selected_feature_metadata = _get_feature_metadata_for_columns(
+        feature_metadata,
+        lcn_df.columns,
     )
 
     # -------------------------------------------------------------
-    # Generate structure using ONLY the selected variables.
+    # 2. Generate DAG.
     # -------------------------------------------------------------
     edges = generate_structure(
         df=lcn_df,
@@ -1143,7 +1328,7 @@ def _generate_csv_candidate(
     )
 
     # -------------------------------------------------------------
-    # Generate credal sets using ONLY the selected variables.
+    # 3. Generate base credal sets.
     # -------------------------------------------------------------
     credal_sets, _ = generate_credal_sets_deterministic(
         df=lcn_df,
@@ -1156,39 +1341,51 @@ def _generate_csv_candidate(
     )
 
     # -------------------------------------------------------------
-    # Filter semantic constraints so that only constraints whose
-    # variables exist in this particular LCN size are retained.
+    # 4. Filter semantic constraints.
+    #
+    #    Only constraints whose variables are present AND whose
+    #    IF -> THEN relationship is an actual DAG edge survive.
     # -------------------------------------------------------------
     filtered_constraints = (
         _filter_semantic_constraints_for_nodes(
             nodes=nodes,
-            feature_metadata=feature_metadata,
+            edges=edges,
+            feature_metadata=selected_feature_metadata,
             semantic_constraints=semantic_constraints,
         )
     )
 
     # -------------------------------------------------------------
-    # Generate semantic/domain constraints.
+    # 5. Translate semantic constraints to X1/X2/... format.
     # -------------------------------------------------------------
     if (
         feature_metadata is not None
         and filtered_constraints
     ):
-
-        logical_constraints = (
-            generate_semantic_constraints(
-                nodes=nodes,
-                feature_metadata=feature_metadata,
-                semantic_constraints=filtered_constraints,
-            )
+        logical_constraints = generate_semantic_constraints(
+            nodes=nodes,
+            feature_metadata=selected_feature_metadata,
+            semantic_constraints=filtered_constraints,
         )
-
     else:
-
         logical_constraints = []
 
     # -------------------------------------------------------------
-    # Assemble candidate LCN.
+    # 6. Apply logical constraints to the actual CPTs.
+    #
+    #    This is CRITICAL.
+    #
+    #    logical_constraints alone are not sufficient because the
+    #    downstream validator expects the CPT to reflect them.
+    # -------------------------------------------------------------
+    credal_sets = _apply_logical_constraints_to_credal_sets(
+        credal_sets=credal_sets,
+        edges=edges,
+        logical_constraints=logical_constraints,
+    )
+
+    # -------------------------------------------------------------
+    # 7. Assemble candidate LCN.
     # -------------------------------------------------------------
     lcn = {
         "nodes": nodes,
@@ -1198,7 +1395,7 @@ def _generate_csv_candidate(
     }
 
     # -------------------------------------------------------------
-    # Final safety check.
+    # 8. Final safety check.
     # -------------------------------------------------------------
     if len(lcn["nodes"]) != size:
         raise RuntimeError(
@@ -1207,6 +1404,42 @@ def _generate_csv_candidate(
         )
 
     return lcn
+
+
+def _get_feature_metadata_for_columns(
+    feature_metadata,
+    columns,
+):
+    """
+    Return feature metadata only for columns present in the
+    generated/selected LCN.
+
+    The global FEATURE_METADATA may describe all possible
+    variables (e.g. X1-X14), while an individual LCN may
+    intentionally contain only a subset (e.g. X1-X4).
+    """
+
+    if feature_metadata is None:
+        return None
+
+    columns = list(columns)
+
+    missing_metadata = [
+        col
+        for col in columns
+        if col not in feature_metadata
+    ]
+
+    if missing_metadata:
+        raise ValueError(
+            "Feature metadata is missing entries for CSV "
+            f"columns: {missing_metadata}"
+        )
+
+    return {
+        col: feature_metadata[col]
+        for col in columns
+    }
 
 
 def generate_lcn_from_csv(
