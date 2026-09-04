@@ -16,6 +16,7 @@ Except that LCN is generated from medical data
 # ---------- EXPERIMENT RUNNER -------------
 
 def run_rq2_med_experiment_steps(
+    run_num,
     size,
     interval_width,
     width_dist_type,
@@ -28,8 +29,13 @@ def run_rq2_med_experiment_steps(
     # ----------------------------------------------------
     # STEP 1: Generate a ground-truth LCN (data-generating model)
     # ----------------------------------------------------
-    # Still to complete
-    lcn = generate_and_save_lcn()
+    lcn = generate_and_save_lcn(
+        csv_path="medical_data.csv",
+        size=size,
+        interval_width=interval_width,
+        width_dist_type=width_dist_type,
+        in_degree=in_degree
+    )
 
     # ----------------------------------------------------
     # STEP 2: Sample data from the LCN
@@ -195,7 +201,7 @@ def rq2_med_experiments_variation_run():
     search_method = "hill_climbing"
 
     # VARIABLES OF INTEREST
-    sizes = [5, 7, 9]
+    sizes = [5, 7, 9, 11]
 
     in_degrees = [1, 2, 3, 4, 5]
 
@@ -240,6 +246,7 @@ def rq2_med_experiments_variation_run():
             )
 
             results = run_rq2_med_experiment_steps(
+                run_num=run_counter,
                 size=size,
                 interval_width=interval_width,
                 width_dist_type=width_dist_type,
@@ -268,8 +275,8 @@ def rq2_med_experiments_variation_run():
 
             save_experiment_to_json(
                 experiment_obj,
-                f"rq2_run_{run_counter}",
-                "results_rq2"
+                f"rq2_med_run_{run_counter}",
+                "med_results_rq2"
             )
 
             # all_experiments.append(experiment_obj)

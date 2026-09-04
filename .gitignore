@@ -8,6 +8,7 @@ __pycache__/
 results
 results_med
 results_rq2
+med_results_rq2
 
 # Ignore summary csv
 experiment_summary.csv
