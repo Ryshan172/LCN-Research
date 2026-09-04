@@ -987,9 +987,124 @@ def generate_semantic_constraints(
     return logical_constraints
 
 
+def _select_lcn_columns(
+    df,
+    size,
+):
+    """
+    Select exactly `size` variables from the CSV to form the LCN.
+
+    The first `size` CSV columns are selected, preserving their original
+    order.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Full binary CSV dataset.
+
+    size : int
+        Desired number of LCN nodes.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame containing exactly `size` selected columns.
+    """
+
+    if not isinstance(size, (int, np.integer)):
+        raise ValueError(
+            f"size must be an integer. Got: {type(size).__name__}"
+        )
+
+    size = int(size)
+
+    if size < 1:
+        raise ValueError(
+            "size must be >= 1."
+        )
+
+    available_size = len(df.columns)
+
+    if size > available_size:
+        raise ValueError(
+            f"Requested LCN size ({size}) is larger than the "
+            f"number of variables in the CSV ({available_size})."
+        )
+
+    selected_columns = list(
+        df.columns[:size]
+    )
+
+    return df.loc[
+        :,
+        selected_columns
+    ].copy()
+
+
+def _filter_semantic_constraints_for_nodes(
+    nodes,
+    feature_metadata,
+    semantic_constraints,
+):
+    """
+    Keep only semantic constraints whose referenced features are
+    present in the generated LCN.
+
+    Constraints involving variables excluded by the requested LCN
+    size are skipped.
+
+    This is important when, for example, the CSV contains X1-X14
+    but size=10.
+    """
+
+    if (
+        feature_metadata is None
+        or semantic_constraints is None
+    ):
+        return []
+
+    selected_nodes = set(nodes)
+
+    selected_semantic_names = {
+        feature_metadata[node]["name"]
+        for node in selected_nodes
+        if node in feature_metadata
+    }
+
+    filtered_constraints = []
+
+    for rule in semantic_constraints:
+
+        if "if" not in rule or "then" not in rule:
+            raise ValueError(
+                "Each semantic constraint must contain 'if' and 'then'."
+            )
+
+        referenced_features = (
+            set(rule["if"].keys())
+            | set(rule["then"].keys())
+        )
+
+        # ---------------------------------------------------------
+        # If the rule refers to a feature that isn't part of the
+        # requested LCN, it cannot be represented in this LCN.
+        # ---------------------------------------------------------
+        if not referenced_features.issubset(
+            selected_semantic_names
+        ):
+            continue
+
+        filtered_constraints.append(
+            rule
+        )
+
+    return filtered_constraints
+
+
 # Separates one generation attempt from the retry logic.
 def _generate_csv_candidate(
     df,
+    size,
     interval_width,
     width_dist_type,
     in_degree,
@@ -1000,27 +1115,38 @@ def _generate_csv_candidate(
     deterministic_min_count=1,
 ):
     """
-    Generate one candidate LCN from CSV data.
+    Generate one candidate LCN containing exactly `size` nodes.
 
-    This function performs exactly one generation attempt.
+    The full CSV may contain more variables than the requested LCN
+    size. Only the first `size` columns are used.
     """
 
-    nodes = list(df.columns)
+    # -------------------------------------------------------------
+    # Select exactly `size` variables.
+    # -------------------------------------------------------------
+    lcn_df = _select_lcn_columns(
+        df=df,
+        size=size,
+    )
+
+    nodes = list(
+        lcn_df.columns
+    )
 
     # -------------------------------------------------------------
-    # Generate structure
+    # Generate structure using ONLY the selected variables.
     # -------------------------------------------------------------
     edges = generate_structure(
-        df=df,
+        df=lcn_df,
         corr_threshold=corr_threshold,
         in_degree=in_degree,
     )
 
     # -------------------------------------------------------------
-    # Generate credal sets
+    # Generate credal sets using ONLY the selected variables.
     # -------------------------------------------------------------
     credal_sets, _ = generate_credal_sets_deterministic(
-        df=df,
+        df=lcn_df,
         nodes=nodes,
         edges=edges,
         interval_width=interval_width,
@@ -1030,18 +1156,30 @@ def _generate_csv_candidate(
     )
 
     # -------------------------------------------------------------
-    # Generate semantic/domain constraints
+    # Filter semantic constraints so that only constraints whose
+    # variables exist in this particular LCN size are retained.
+    # -------------------------------------------------------------
+    filtered_constraints = (
+        _filter_semantic_constraints_for_nodes(
+            nodes=nodes,
+            feature_metadata=feature_metadata,
+            semantic_constraints=semantic_constraints,
+        )
+    )
+
+    # -------------------------------------------------------------
+    # Generate semantic/domain constraints.
     # -------------------------------------------------------------
     if (
         feature_metadata is not None
-        and semantic_constraints is not None
+        and filtered_constraints
     ):
 
         logical_constraints = (
             generate_semantic_constraints(
                 nodes=nodes,
                 feature_metadata=feature_metadata,
-                semantic_constraints=semantic_constraints,
+                semantic_constraints=filtered_constraints,
             )
         )
 
@@ -1050,7 +1188,7 @@ def _generate_csv_candidate(
         logical_constraints = []
 
     # -------------------------------------------------------------
-    # Assemble candidate LCN
+    # Assemble candidate LCN.
     # -------------------------------------------------------------
     lcn = {
         "nodes": nodes,
@@ -1059,11 +1197,21 @@ def _generate_csv_candidate(
         "logical_constraints": logical_constraints,
     }
 
+    # -------------------------------------------------------------
+    # Final safety check.
+    # -------------------------------------------------------------
+    if len(lcn["nodes"]) != size:
+        raise RuntimeError(
+            f"Internal generation error: requested size={size}, "
+            f"but generated {len(lcn['nodes'])} nodes."
+        )
+
     return lcn
 
 
 def generate_lcn_from_csv(
     csv_path,
+    size,
     interval_width=0.2,
     width_dist_type="beta",
     in_degree=1,
@@ -1081,6 +1229,23 @@ def generate_lcn_from_csv(
     ----------
     csv_path : str or Path
         Path to the binary CSV file.
+
+    size : int
+        Desired number of nodes in the generated LCN.
+
+        If the CSV contains more variables than `size`, only the
+        first `size` variables are used.
+
+        Example:
+            CSV = X1,...,X14
+            size = 5
+
+        produces:
+
+            nodes = ["X1", "X2", "X3", "X4", "X5"]
+
+        If `size` is greater than the number of CSV columns, an
+        exception is raised.
 
     interval_width : float
         Width parameter used when generating credal intervals.
@@ -1118,23 +1283,30 @@ def generate_lcn_from_csv(
     Returns
     -------
     lcn, df
-        The first valid LCN and the loaded dataframe.
+        The valid LCN and the full loaded dataframe.
 
     Notes
     -----
-    The function follows the same retry pattern as create_lcn():
+    `size` directly controls the number of nodes in the generated LCN.
 
-        generate candidate
-        -> validate candidate
-        -> regenerate if invalid
-        -> return valid candidate
-
-    The CSV determines the LCN node set/size:
-
-        size = len(df.columns)
-
-    Therefore size does not need to be supplied separately.
+    The CSV is loaded in full, but only the first `size` columns are
+    used for LCN generation.
     """
+
+    # -------------------------------------------------------------
+    # Validate parameters.
+    # -------------------------------------------------------------
+    if not isinstance(size, (int, np.integer)):
+        raise ValueError(
+            f"size must be an integer. Got: {type(size).__name__}"
+        )
+
+    size = int(size)
+
+    if size < 1:
+        raise ValueError(
+            "size must be >= 1."
+        )
 
     if max_attempts < 1:
         raise ValueError(
@@ -1158,17 +1330,33 @@ def generate_lcn_from_csv(
         csv_path
     )
 
-    # The CSV determines the LCN size.
-    size = len(df.columns)
+    available_size = len(
+        df.columns
+    )
 
-    if size == 0:
+    if available_size == 0:
         raise ValueError(
             "The CSV contains no variables."
         )
 
+    # -------------------------------------------------------------
+    # size now ACTUALLY determines the LCN size.
+    # -------------------------------------------------------------
+    if size > available_size:
+        raise ValueError(
+            f"Requested LCN size ({size}) is larger than the "
+            f"number of variables in the CSV ({available_size})."
+        )
+
+    selected_nodes = list(
+        df.columns[:size]
+    )
+
     print(
-        f"Generating LCN from CSV with "
-        f"size={size}, "
+        f"Generating LCN from CSV: "
+        f"requested_size={size}, "
+        f"available_variables={available_size}, "
+        f"selected_variables={selected_nodes}, "
         f"interval_width={interval_width}, "
         f"width_dist_type='{width_dist_type}', "
         f"in_degree={in_degree}"
@@ -1189,7 +1377,8 @@ def generate_lcn_from_csv(
 
         print(
             f"\nGenerating candidate LCN "
-            f"(attempt {attempts}/{max_attempts})..."
+            f"(size={size}, "
+            f"attempt {attempts}/{max_attempts})..."
         )
 
         # ---------------------------------------------------------
@@ -1200,6 +1389,7 @@ def generate_lcn_from_csv(
         # ---------------------------------------------------------
         lcn = _generate_csv_candidate(
             df=df,
+            size=size,
             interval_width=interval_width,
             width_dist_type=width_dist_type,
             in_degree=in_degree,
@@ -1227,15 +1417,23 @@ def generate_lcn_from_csv(
     # Failed after maximum attempts.
     # -------------------------------------------------------------
     if not is_valid:
-
         raise RuntimeError(
-            f"Failed to generate valid LCN after "
-            f"{max_attempts} attempts."
+            f"Failed to generate valid LCN of size={size} "
+            f"after {max_attempts} attempts."
+        )
+
+    # -------------------------------------------------------------
+    # Final node-count assertion.
+    # -------------------------------------------------------------
+    if len(lcn["nodes"]) != size:
+        raise RuntimeError(
+            f"Generated LCN has {len(lcn['nodes'])} nodes, "
+            f"but requested size={size}."
         )
 
     print(
-        f"\nValid LCN generated on attempt "
-        f"{attempts}."
+        f"\nValid LCN of size={size} "
+        f"generated on attempt {attempts}."
     )
 
     return lcn, df
@@ -1252,12 +1450,13 @@ def save_lcn(lcn, output_path):
 def generate_and_save_lcn(
     csv_path,
     output_path="generated_lcn.json",
+    size=None,
     interval_width=0.2,
     width_dist_type="beta",
     in_degree=1,
     corr_threshold=0.15,
-    feature_metadata=None,
-    semantic_constraints=None,
+    feature_metadata=FEATURE_METADATA,
+    semantic_constraints=SEMANTIC_CONSTRAINTS,
     deterministic_threshold=1.0,
     deterministic_min_count=1,
     max_attempts=10,
@@ -1272,6 +1471,17 @@ def generate_and_save_lcn(
 
     output_path : str or Path
         Output JSON path.
+
+    size : int, optional
+        Desired number of nodes in the generated LCN.
+
+        If None, all variables in the CSV are used.
+
+        If supplied and smaller than the number of CSV columns,
+        only the first `size` columns are used.
+
+        If supplied and larger than the number of CSV columns,
+        ValueError is raised.
 
     interval_width : float
         Credal interval width parameter.
@@ -1312,8 +1522,31 @@ def generate_and_save_lcn(
         The valid generated LCN.
     """
 
+    # -------------------------------------------------------------
+    # Backwards-compatible behaviour:
+    # if size is omitted, use every variable in the CSV.
+    # -------------------------------------------------------------
+    if size is None:
+
+        df = load_binary_csv(
+            csv_path
+        )
+
+        size = len(
+            df.columns
+        )
+
+        if size == 0:
+            raise ValueError(
+                "The CSV contains no variables."
+            )
+
+    # -------------------------------------------------------------
+    # Generate the LCN.
+    # -------------------------------------------------------------
     lcn, _ = generate_lcn_from_csv(
         csv_path=csv_path,
+        size=size,
         interval_width=interval_width,
         width_dist_type=width_dist_type,
         in_degree=in_degree,
@@ -1325,6 +1558,9 @@ def generate_and_save_lcn(
         max_attempts=max_attempts,
     )
 
+    # -------------------------------------------------------------
+    # Save.
+    # -------------------------------------------------------------
     save_lcn(
         lcn,
         output_path,
@@ -1332,3 +1568,6 @@ def generate_and_save_lcn(
 
     return lcn
 
+
+
+#TODO: Constraints not being generated like in old file. See why
