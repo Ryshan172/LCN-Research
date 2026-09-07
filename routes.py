@@ -19,6 +19,7 @@ from workflows.application_workflow import run_application_workflow, summarise_a
 from workflows.med_data_workflow import run_medical_experiments
 from workflows.rq1_experiments import experiment_run_controller, experiment_run_variants
 from workflows.rq2_experiments import rq2_experiment_run_variants_simple, summarise_rq2_results
+from workflows.rq2_med_app_workflow import generate_med_test_lcn, rq2_med_experiments_variation_run
 
 router = APIRouter()
 
@@ -330,6 +331,42 @@ def summarise_rq2_experiment_results():
     try:
 
         summarise_rq2_results()
+
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error summarising experiments: {e}"
+        )
+
+
+@router.post("/run_rq2_med_experiments")
+def run_rq2_med_data_experiments():
+    try:
+
+        rq2_med_experiments_variation_run()
+
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error running experiments: {e}"
+        )
+
+@router.post("/summarise-rq2-med-res")
+def summarise_rq2_med():
+    try:
+
+        summarise_rq2_results(
+            results_dir="med_results_rq2",
+            output_csv="rq2_med_results.csv"
+        )
 
         return {
             "status": "success",
