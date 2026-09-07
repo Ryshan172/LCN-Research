@@ -1800,7 +1800,3 @@ def generate_and_save_lcn(
     # )
 
     return lcn
-
-
-
-#TODO: Constraints not being generated like in old file. See why

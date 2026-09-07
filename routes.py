@@ -358,3 +358,22 @@ def run_rq2_med_data_experiments():
             status_code=500,
             detail=f"Error running experiments: {e}"
         )
+
+@router.post("/summarise-rq2-med-res")
+def summarise_rq2_med():
+    try:
+
+        summarise_rq2_results(
+            results_dir="med_results_rq2",
+            output_csv="rq2_med_results.csv"
+        )
+
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error summarising experiments: {e}"
+        )

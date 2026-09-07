@@ -201,7 +201,7 @@ def rq2_med_experiments_variation_run():
     search_method = "hill_climbing"
 
     # VARIABLES OF INTEREST
-    sizes = [5, 7, 9, 11]
+    sizes = [7, 9, 11, 13]
 
     in_degrees = [1, 2, 3, 4, 5]
 
