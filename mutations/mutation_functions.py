@@ -196,11 +196,72 @@ def get_relevant_constraints(
 
 
 
+def apply_targeted_edit(edges, mutation_type, edge):
+    """
+    Applies ONE specific edit to an edge list.
+
+    Used when the search procedure (e.g. LA-GHC / LANO) decides
+    WHICH node relationship is offered up for mutation, while the
+    mutation operator still decides HOW the mutation occurs.
+
+    Returns
+    -------
+    (candidate_edges, affected_nodes), or None if the edit is not
+    applicable to the current edge list.
+    """
+
+    a, b = edge
+    candidate_edges = copy.deepcopy(edges)
+
+    if mutation_type == "edge_add":
+        # Can't add an edge that already exists
+        if (a, b) in candidate_edges:
+            return None
+        candidate_edges.append((a, b))
+
+    elif mutation_type == "edge_delete":
+        # Can only delete an edge that exists
+        if (a, b) not in candidate_edges:
+            return None
+        candidate_edges.remove((a, b))
+
+    elif mutation_type == "edge_flip":
+        # Can only flip an edge that exists: a -> b becomes b -> a
+        if (a, b) not in candidate_edges:
+            return None
+        i = candidate_edges.index((a, b))
+        candidate_edges[i] = (b, a)
+
+    else:
+        return None
+
+    # New edges, plus the two variables the edit touched
+    return candidate_edges, {a, b}
+
+
 #--------------- Mutation Functions------------------------------------
-def standard_mutation(lcn_state, mutation_type="edge_add", max_attempts=10):
+def standard_mutation(lcn_state, mutation_type="edge_add", max_attempts=10, edge=None):
+    """
+    edge:
+        Optional (source, target). When supplied, that specific edit is
+        applied instead of a randomly selected one. When None, behaviour
+        is unchanged from RQ2.
+    """
 
     nodes = lcn_state["nodes"]
     edges = copy.deepcopy(lcn_state["edges"])
+
+    # Targeted mode (used by LA-GHC): apply the given edge only
+    if edge is not None:
+        applied = apply_targeted_edit(edges, mutation_type, edge)
+
+        # Not applicable: return the state unchanged
+        if applied is None:
+            return lcn_state
+
+        candidate = copy.deepcopy(lcn_state)
+        candidate["edges"] = applied[0]
+        return candidate
 
     for _ in range(max_attempts):
 
@@ -241,7 +302,8 @@ def constraint_aware_mutation(
     lcn_state,
     constraint_index,
     mutation_type="edge_add",
-    max_attempts=10
+    max_attempts=10,
+    edge=None
 ):
     """
     Instead of allowing every add/remove/reverse operation, 
@@ -259,10 +321,38 @@ def constraint_aware_mutation(
         - Generates candidate mutations
         - Rejects those violating local constraints
         - Ensures at least one valid mutation is returned
+
+    edge:
+        Optional (source, target). When supplied, only that specific
+        edit is checked; if it violates local constraints the state is
+        returned unchanged (there is nothing else to retry).
     """
 
     nodes = lcn_state["nodes"]
     edges = copy.deepcopy(lcn_state["edges"])
+
+    # Targeted mode (used by LA-GHC): check the given edge only
+    if edge is not None:
+        applied = apply_targeted_edit(edges, mutation_type, edge)
+
+        # Not applicable: return the state unchanged
+        if applied is None:
+            return lcn_state
+
+        candidate_edges, affected_nodes = applied
+
+        candidate = copy.deepcopy(lcn_state)
+        candidate["edges"] = candidate_edges
+
+        # Reject the edit if it breaks a nearby constraint
+        if local_constraint_violation(
+            candidate,
+            affected_nodes,
+            constraint_index
+        ):
+            return lcn_state
+
+        return candidate
 
     for _ in range(max_attempts):
 
@@ -319,7 +409,8 @@ def post_mutation_contraint_repair(
     constraint_index,
     mutation_type="edge_add",
     max_attempts=10,
-    max_repairs=3
+    max_repairs=3,
+    edge=None
 ):
     """
     POST-MUTATION REPAIR
@@ -329,12 +420,17 @@ def post_mutation_contraint_repair(
     2. Identify local footprint
     3. Retrieve locally relevant constraints
     4. Repair missing dependency edges
+
+    edge:
+        Optional (source, target) passed through to standard_mutation
+        so step 1 applies that specific edit.
     """
 
     candidate = standard_mutation(
         lcn_state,
         mutation_type,
-        max_attempts
+        max_attempts,
+        edge=edge
     )
 
     original_edges = set(lcn_state["edges"])

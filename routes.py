@@ -20,6 +20,7 @@ from workflows.med_data_workflow import run_medical_experiments
 from workflows.rq1_experiments import experiment_run_controller, experiment_run_variants
 from workflows.rq2_experiments import rq2_experiment_run_variants_simple, summarise_rq2_results
 from workflows.rq2_med_app_workflow import generate_med_test_lcn, rq2_med_experiments_variation_run
+from workflows.rq3_experiments import rq3_main_experiments, rq3_robustness_experiments, rq3_sensitivity_experiments, summarise_rq3_results
 
 router = APIRouter()
 
@@ -366,6 +367,54 @@ def summarise_rq2_med():
         summarise_rq2_results(
             results_dir="med_results_rq2",
             output_csv="rq2_med_results.csv"
+        )
+
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error summarising experiments: {e}"
+        )
+
+
+#---------------- Research Question 3 Endpoints -----------------
+# Each RQ3 experiment saves its runs to results_<experiment name>
+RQ3_EXPERIMENTS = {
+    "rq3_main": rq3_main_experiments,
+    "rq3_sensitivity": rq3_sensitivity_experiments,
+    "rq3_robustness": rq3_robustness_experiments,
+}
+
+@router.post("/run-rq3-experiments")
+def run_rq3_experiments(experiment: str = "rq3_main"):
+    try:
+        # Run one Research Question 3 experiment
+        # (rq3_main, rq3_sensitivity or rq3_robustness)
+        if experiment not in RQ3_EXPERIMENTS:
+            raise ValueError(f"Unknown experiment: {experiment}")
+
+        RQ3_EXPERIMENTS[experiment]()
+
+        return {
+            "status": "success",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error running experiments: {e}"
+        )
+
+@router.post("/summarise-rq3-results")
+def summarise_rq3_experiment_results(experiment: str = "rq3_main"):
+    try:
+
+        summarise_rq3_results(
+            results_dir=f"results_{experiment}",
+            output_csv=f"{experiment}_results_summary.csv"
         )
 
         return {
