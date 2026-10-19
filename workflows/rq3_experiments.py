@@ -228,7 +228,7 @@ def method_applicable(search_method, initialisation, scoring):
     rq2_ghc always starts from the empty graph and scores with "mid".
     """
     if search_method == "rq2_ghc":
-        return initialisation == "empty" and scoring == "mid"
+        return initialisation == "empty"
 
     return True
 
@@ -268,7 +268,8 @@ def run_search(
             logical_constraints=initial_state["logical_constraints"],
             mutation_strategy=mutation_strategy,
             mutation_type=rq2_mutation_type,
-            max_iter=max_evaluations - 1
+            max_iter=max_evaluations - 1,
+            scoring=scoring
         )
 
         # Evaluation at which the best score was first reached
@@ -627,10 +628,10 @@ def rq3_sensitivity_experiments():
     rq3_experiment_run_variants(
         experiment_name="rq3_sensitivity",
         sizes=(9, 12),
-        in_degrees=(2,),
+        in_degrees=(1, 2, 3),
         interval_widths=(0.3, 0.5),
         scorings=("low", "mid", "high"),
-        initialisations=("random",),
+        initialisations=("empty","random"),
     )
 
 
@@ -641,9 +642,9 @@ def rq3_robustness_experiments():
     """
     rq3_experiment_run_variants(
         experiment_name="rq3_robustness",
-        sizes=(9, 12),
-        in_degrees=(2,),
-        initialisations=("random",),
+        sizes=(9, 12, 15),
+        in_degrees=(2, 3, 5),
+        initialisations=("empty","random"),
         constraint_noises=(0.0, 0.5, 1.0),
     )
 
