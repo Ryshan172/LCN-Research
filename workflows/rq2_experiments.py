@@ -202,10 +202,12 @@ def hill_climb(
     logical_constraints=None,
     mutation_strategy="standard",
     mutation_type="edge_add",
-    max_iter=100
+    max_iter=100,
+    scoring="mid"
 ):
     """
-    Standard greedy hill climbing over FULL LCN state.
+    Greedy hill climbing using the selected
+    Interval BIC scoring mode: low, mid, or high.
     """
 
     # Updated to pass logical constraints as well
@@ -214,7 +216,12 @@ def hill_climb(
         logical_constraints=logical_constraints
     )
 
-    current_score = score_structure(current, samples_df, aggregate_table)
+    current_score = score_structure(
+        current,
+        samples_df,
+        aggregate_table,
+        scoring=scoring
+    )
 
     best = copy.deepcopy(current)
     best_score = current_score
@@ -230,7 +237,12 @@ def hill_climb(
             mutation_type=mutation_type
         )
 
-        candidate_score = score_structure(candidate, samples_df, aggregate_table)
+        candidate_score = score_structure(
+            candidate,
+            samples_df,
+            aggregate_table,
+            scoring=scoring
+        )
 
         if candidate_score > current_score:
             current = candidate
