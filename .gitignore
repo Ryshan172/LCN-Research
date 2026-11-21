@@ -13,3 +13,6 @@ results_rq3*
 
 # Ignore summary csv
 experiment_summary.csv
+
+# Results files
+*.csv
