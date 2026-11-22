@@ -40,7 +40,7 @@ class TestRQ1IBIC(unittest.TestCase):
             with self.assertRaises(ValueError):
                 RQ1FamilyScores(self.data, [], interval_width=width)
 
-    # Change done: an infinite-score tie must never become an improving pgmpy move.
+    # Change done: a tied midpoint may improve the upper endpoint while remaining -inf.
     def test_unbounded_start(self):
         data = pd.DataFrame([(0, 0)] * 80 + [(1, 0)] * 16 + [(1, 1)] * 4, columns=["A", "Y"])
         for rank in ("low", "mid"):
@@ -51,8 +51,18 @@ class TestRQ1IBIC(unittest.TestCase):
             tied = data.assign(A=data["Y"])
             fit = RQ1FamilyScores(tied, [], interval_width=0.2)
             edges, score = run_interval_bic_hillclimb(tied, None, rank, family_scores=fit)
-            self.assertEqual(set(edges), set())
+            self.assertEqual(len(edges), int(rank == "mid"))
             self.assertEqual(score, -math.inf)
+
+    # Change done: two rare children need separate edits before the midpoint is finite.
+    def test_midpoint_crosses_multiple_unbounded_families(self):
+        pair = [(0, 0)] * 80 + [(1, 0)] * 16 + [(1, 1)] * 4
+        data = pd.DataFrame([left + right for left in pair for right in pair],
+                            columns=["A", "Y", "B", "Z"])
+        fit = RQ1FamilyScores(data, [], interval_width=0.2)
+        edges, score = run_interval_bic_hillclimb(data, None, "mid", family_scores=fit)
+        self.assertEqual(set(edges), {("A", "Y"), ("B", "Z")})
+        self.assertTrue(math.isfinite(score))
 
     def test_row_extrema_at_boundary_and_interior(self):
         f = lambda p: math.log1p(-p) + 4 * math.log(p)

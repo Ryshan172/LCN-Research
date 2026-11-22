@@ -167,7 +167,8 @@ def build_precise_bn_from_lcn(lcn):
             cpd = TabularCPD(
                 variable=node,
                 variable_card=2,
-                values=[[p_true], [p_false]]
+                # Change done: pgmpy maps row 0 to False and row 1 to True.
+                values=[[p_false], [p_true]]
             )
 
             model.add_cpds(cpd)
@@ -177,10 +178,10 @@ def build_precise_bn_from_lcn(lcn):
         n_parents = len(parent_list)
         n_combinations = 2 ** n_parents
 
-        # Initialize CPT rows: True row + False row
+        # Change done: use the same False, True order for child rows and parent states.
         full_values = [
-            [0.0] * n_combinations,  # True probabilities
-            [0.0] * n_combinations   # False probabilities
+            [0.0] * n_combinations,  # False probabilities
+            [0.0] * n_combinations   # True probabilities
         ]
 
         # Iterate over all parent configurations in pgmpy order
@@ -203,15 +204,15 @@ def build_precise_bn_from_lcn(lcn):
             p_false = 1.0 - p_true
 
             # Write probabilities
-            full_values[0][idx] = p_true
-            full_values[1][idx] = p_false
+            full_values[0][idx] = p_false
+            full_values[1][idx] = p_true
 
         # Use the *actual* parent state that occurred in the sample
         actual_pc = {p: sampled_states[p] for p in parent_list}
         actual_config = tuple(actual_pc[p] for p in parent_list)
         actual_idx = list(itertools.product([False, True], repeat=n_parents)).index(actual_config)
 
-        sampled_states[node] = random.random() < full_values[0][actual_idx]
+        sampled_states[node] = random.random() < full_values[1][actual_idx]
 
         # Create TabularCPD
         parent_card = [2] * n_parents

@@ -1,3 +1,6 @@
+from itertools import permutations
+from math import fsum, inf
+
 import networkx as nx
 from pgmpy.base import DAG
 from pgmpy.estimators import HillClimbSearch, BIC, ExpertKnowledge
@@ -65,6 +68,52 @@ def run_hillclimbing_bic(df):
     return best_model.edges(), best_score
 
 
+# Change done: compare complete graphs on a midpoint plateau. Local score differences
+# can be undefined (-inf minus -inf), including when a reversal changes two families.
+def _midpoint_rank(dag, families):
+    intervals = [families.interval(node, tuple(dag.predecessors(node))) for node in dag]
+    lower = fsum(lo for lo, _ in intervals)
+    upper = fsum(hi for _, hi in intervals)
+    midpoint = (lower + upper) / 2
+    return midpoint, upper if midpoint == -inf else 0.0
+
+
+def _midpoint_neighbours(dag, required):
+    for parent, child in permutations(sorted(dag), 2):
+        if dag.has_edge(parent, child):
+            if (parent, child) in required:
+                continue
+            candidate = dag.copy()
+            candidate.remove_edge(parent, child)
+            yield candidate
+            if not nx.has_path(candidate, parent, child):
+                flipped = candidate.copy()
+                flipped.add_edge(child, parent)
+                yield flipped
+        elif not nx.has_path(dag, child, parent):
+            candidate = dag.copy()
+            candidate.add_edge(parent, child)
+            yield candidate
+
+
+# Change done: a finite midpoint wins first. While all midpoints are -inf, take
+# an improving upper endpoint and keep the reported midpoint at its actual value.
+def _cross_midpoint_plateau(dag, families):
+    rank = _midpoint_rank(dag, families)
+    while rank[0] == -inf:
+        best, best_rank = dag, rank
+        for candidate in _midpoint_neighbours(dag, families.required_edges):
+            candidate_rank = _midpoint_rank(candidate, families)
+            if candidate_rank > best_rank:
+                best, best_rank = candidate, candidate_rank
+        # Ignore rounding noise on an otherwise flat upper endpoint.
+        if best_rank[0] == -inf and best_rank[1] <= rank[1] + 1e-10:
+            return dag, False
+        dag, rank = best, best_rank
+    # With a finite midpoint, resume the existing pgmpy midpoint search.
+    return dag, True
+
+
 # Change done: compare legal first moves by actual scores when the initial IBIC is -inf.
 def _rq1_start_dag(nodes, scorer, required_edges):
     dag = DAG()
@@ -72,6 +121,8 @@ def _rq1_start_dag(nodes, scorer, required_edges):
     dag.add_edges_from(required_edges)
     if not nx.is_directed_acyclic_graph(dag):
         raise ValueError("Required RQ1 rule edges form a cycle")
+    if scorer.scoring == "mid":
+        return _cross_midpoint_plateau(dag, scorer.family_scores)
     unbounded = [
         node for node in nodes
         if scorer.local_score(node, list(dag.predecessors(node))) == float("-inf")
