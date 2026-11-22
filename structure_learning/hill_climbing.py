@@ -1,4 +1,6 @@
-from pgmpy.estimators import HillClimbSearch, BIC
+import networkx as nx
+from pgmpy.base import DAG
+from pgmpy.estimators import HillClimbSearch, BIC, ExpertKnowledge
 import os
 from pgmpy.estimators import StructureScore
 
@@ -63,8 +65,41 @@ def run_hillclimbing_bic(df):
     return best_model.edges(), best_score
 
 
-# Interval BIC Interval Hill Climbing wrapper
-def run_interval_bic_hillclimb(df_samples, full_table, scoring):
+# Change done: compare legal first moves by actual scores when the initial IBIC is -inf.
+def _rq1_start_dag(nodes, scorer, required_edges):
+    dag = DAG()
+    dag.add_nodes_from(nodes)
+    dag.add_edges_from(required_edges)
+    if not nx.is_directed_acyclic_graph(dag):
+        raise ValueError("Required RQ1 rule edges form a cycle")
+    unbounded = [
+        node for node in nodes
+        if scorer.local_score(node, list(dag.predecessors(node))) == float("-inf")
+    ]
+    if not unbounded:
+        return dag, True
+
+    # Every starting edge is required. Only additions are legal, and an addition
+    # changes one child. With multiple unbounded families every neighbour ties.
+    if len(unbounded) > 1:
+        return dag, False
+    child = unbounded[0]
+    parents = list(dag.predecessors(child))
+    candidates = set(nodes) - {child} - set(parents) - nx.descendants(dag, child)
+    best_parent = None
+    best_score = float("-inf")
+    for parent in sorted(candidates):
+        score = scorer.local_score(child, parents + [parent])
+        if score > best_score:
+            best_parent, best_score = parent, score
+    if best_parent is None:
+        return dag, False
+    dag.add_edge(best_parent, child)
+    return dag, True
+
+
+# Change done: pass the candidate family scorer and required rule edges to pgmpy.
+def run_interval_bic_hillclimb(df_samples, full_table, scoring, *, family_scores=None):
     """
     Run greedy hill climbing using interval BIC (low/mid/high)
     df_samples: LCN forward samples
@@ -72,9 +107,16 @@ def run_interval_bic_hillclimb(df_samples, full_table, scoring):
     """
 
     df = df_samples.astype("category")
-    scorer = IntervalBICScore(df, full_table, scoring=scoring)
+    scorer = IntervalBICScore(df, full_table, scoring=scoring, family_scores=family_scores)
     hc = HillClimbSearch(df)
-    best_model = hc.estimate(scoring_method=scorer)
+    if family_scores is None:
+        best_model = hc.estimate(scoring_method=scorer)
+    else:
+        knowledge = ExpertKnowledge(required_edges=family_scores.required_edges)
+        start, can_search = _rq1_start_dag(df.columns, scorer, family_scores.required_edges)
+        if not can_search:
+            return start.edges(), float("-inf")
+        best_model = hc.estimate(scoring_method=scorer, start_dag=start, expert_knowledge=knowledge)
 
     # Compute total score using the DAG's parent sets
     total_score = sum(
@@ -94,8 +136,9 @@ class IntervalBICScore(StructureScore):
     Supports 'low', 'mid', 'high' collapsing strategies.
     """
 
-    def __init__(self, data, full_table, scoring="mid"):
+    def __init__(self, data, full_table, scoring="mid", *, family_scores=None):
         super().__init__(data)
+        self.family_scores = family_scores
         self.full_table = full_table
         self.scoring = scoring
 
@@ -103,12 +146,13 @@ class IntervalBICScore(StructureScore):
         """
         Compute the node-level score using interval BIC for the candidate parent set.
         """
-        # Regroup table for this node and parent set
-        df_regrouped = regroup_for_parents(self.full_table, node, parents)
-
-        # Compute node-level interval BIC
-        interval_bic = compute_interval_BIC(df_regrouped)
-        BIC_lower, BIC_upper = interval_bic[node]
+        # Change done: score the candidate's actual parent set for each RQ1 search edit.
+        if self.family_scores is None:
+            # Compatibility with callers supplying only the legacy aggregate table.
+            df_regrouped = regroup_for_parents(self.full_table, node, parents)
+            BIC_lower, BIC_upper = compute_interval_BIC(df_regrouped)[node]
+        else:
+            BIC_lower, BIC_upper = self.family_scores.interval(node, parents)
 
         # Collapse interval
         if self.scoring == "mid":
