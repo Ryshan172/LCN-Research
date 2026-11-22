@@ -139,7 +139,17 @@ class RQ1FamilyScores:
             self.cache[key] = self._family_interval(node, parents)
         return self.cache[key]
 
-    def _family_interval(self, node, parents):
+    # Change done: export the same fitted rows used for scoring so the medical
+    # predictor uses the selected graph's actual feasible probabilities.
+    def fitted_cpt(self, node, parents):
+        parents = tuple(sorted(parents))
+        cpt = {}
+        _, upper = self._family_interval(node, parents, cpt)
+        if upper == -inf:
+            raise ValueError(f"Observed outcomes are impossible for {node}")
+        return cpt
+
+    def _family_interval(self, node, parents, cpt=None):
         if self.cpts and parents != self.parents[node]:
             raise ValueError("Generating CPTs only apply to their own parent set")
         if not self.cpts and any(
@@ -158,7 +168,13 @@ class RQ1FamilyScores:
         for config in product((False, True), repeat=len(parents)):
             false_key, true_key = (*config, False), (*config, True)
             can_false, can_true = false_key in possible, true_key in possible
+            key = None
+            if cpt is not None:
+                key = "[" + ", ".join(f"{p}={v}" for p, v in zip(parents, config)) + "]"
             if not (can_false or can_true):
+                # Unreachable rows need a normalized placeholder for pgmpy's complete CPT.
+                if cpt is not None:
+                    cpt[key] = {"True": [0.5, 0.5], "False": [0.5, 0.5]}
                 continue
             n_false, n_true = counts.get(false_key, 0), counts.get(true_key, 0)
             if not (can_false and can_true):
@@ -169,6 +185,8 @@ class RQ1FamilyScores:
             else:
                 lo, hi = _empirical_bounds(n_true, n_true + n_false, self.interval_width)
                 dimension += 1
+            if cpt is not None:
+                cpt[key] = {"True": [lo, hi], "False": [1 - hi, 1 - lo]}
             row_low, row_high = binary_loglikelihood_bounds(n_true, n_false, lo, hi)
             low += row_low
             high += row_high

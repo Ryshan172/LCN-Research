@@ -10,8 +10,9 @@ from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 from pgmpy.estimators import BIC as BicScore
 
 from lcn_functions.lcn_check import validate_generated_lcn
-from scoring_functions.interval_bic_derivation import compute_interval_BIC, compute_network_interval_BIC
-from workflows.rq1_experiments import contingency_sample_lcn, interval_bic_structure_learn
+from scoring_functions.updated_ibic import RQ1FamilyScores
+from structure_learning.hill_climbing import _midpoint_rank
+import networkx as nx
 
 
 # ----------------- Step 1 code ---------------------------------------------------
@@ -19,6 +20,9 @@ from workflows.rq1_experiments import contingency_sample_lcn, interval_bic_struc
 def load_dataset(csv_path):
     df = pd.read_csv(csv_path)
     df.columns = [c.strip() for c in df.columns]
+    # Change done: reject invalid observations before integer conversion can truncate them.
+    if df.empty or not df.isin([0, 1]).all().all():
+        raise ValueError("The medical application requires complete binary observations.")
     return df.astype(int)
 
 
@@ -406,74 +410,40 @@ def optimize_lcn_bic(initial_lcn, df, max_iters=100, max_parents=2):
     }
 
 
-def optimize_lcn_ibic(initial_lcn, df, max_iters=100, max_parents=2):
-
+def optimize_lcn_ibic(initial_lcn, df, max_iters=100, max_parents=2, *, interval_width=0.2):
+    """Select a midpoint IBIC structure using the medical workflow's candidate mutations."""
     nodes = initial_lcn["nodes"]
-    best_edges = initial_lcn["edges"]
-
-    # initial IBIC baseline (safe)
-    try:
-        lcn_aggregate_table, lcn_samples_df = contingency_sample_lcn(initial_lcn, 200)
-
-        ibic_results = interval_bic_structure_learn(
-            lcn_aggregate_table,
-            lcn_samples_df
-        )
-
-        best_score = ibic_results["network_interval"][1]
-    except Exception:
-        best_score = -np.inf
-
-    best_lcn = initial_lcn
-    history = [best_score]
-
+    rules = initial_lcn["logical_constraints"]
+    # Change done: score every mutation on the same observed records using RQ1's
+    # propagated full width. Previously each graph generated a different sample.
+    families = RQ1FamilyScores(df[nodes], rules, interval_width=interval_width)
+    best = nx.DiGraph()
+    best.add_nodes_from(nodes)
+    best.add_edges_from(initial_lcn["edges"])
+    best.add_edges_from(families.required_edges)
+    if not is_valid_dag(nodes, best.edges(), max_parents):
+        raise ValueError("Initial medical graph violates the DAG or parent limit")
+    best_rank = _midpoint_rank(best, families)
+    if best_rank == (-np.inf, -np.inf):
+        raise ValueError("Medical observations conflict with the supplied logical rules")
+    history = [best_rank[0]]
     for _ in range(max_iters):
-
-        # 1. mutate
-        candidate_edges = mutate_edges(nodes, best_edges)
-
-        candidate_lcn = {
-            "nodes": nodes,
-            "edges": candidate_edges,
-            "credal_sets": initial_lcn["credal_sets"],
-            "logical_constraints": initial_lcn["logical_constraints"]
-        }
-
-        # 2. sync (CRITICAL: always normalize before anything else)
-        candidate_lcn = sync_credal_sets_with_structure(candidate_lcn)
-
-        # Recompute credal sets
-        candidate_lcn = estimate_credal_sets_from_data(df, candidate_lcn)
-
-        # 3. validate DAG + LCN structure
-        if not validate_generated_lcn(candidate_lcn):
+        edges = mutate_edges(nodes, list(best.edges()))
+        if not families.required_edges.issubset(edges) or not is_valid_dag(nodes, edges, max_parents):
             continue
-
-        # 4. SAFE sampling (guard against missing-key crashes)
-        try:
-            candidate_table, candidate_samples = contingency_sample_lcn(candidate_lcn, 500)
-        except KeyError:
-            # silently skip bad structure instead of crashing
-            continue
-
-        # 5. IBIC scoring
-        interval_per_node = compute_interval_BIC(candidate_table)
-        network_interval = compute_network_interval_BIC(interval_per_node)
-
-        candidate_score = (network_interval[0] + network_interval[1]) / 2
-
-        # 6. greedy update
-        if candidate_score > best_score:
-            best_score = candidate_score
-            best_edges = candidate_edges
-            best_lcn = candidate_lcn
-            history.append(best_score)
-
+        candidate = nx.DiGraph()
+        candidate.add_nodes_from(nodes)
+        candidate.add_edges_from(edges)
+        # Change done: compare actual midpoints first. On a -inf plateau an
+        # improving upper endpoint can distinguish two otherwise tied structures.
+        rank = _midpoint_rank(candidate, families)
+        if rank > best_rank:
+            if rank[0] == best_rank[0] == -np.inf and rank[1] <= best_rank[1] + 1e-10:
+                continue
+            best, best_rank = candidate, rank
+            history.append(rank[0])
     return {
-        "nodes": nodes,
-        "edges": best_edges,
-        "ibic_score": best_score,
-        "history": history,
-        "credal_sets": best_lcn["credal_sets"],
-        "logical_constraints": best_lcn["logical_constraints"]
+        "nodes": nodes, "edges": list(best.edges()), "ibic_score": best_rank[0],
+        "history": history, "logical_constraints": rules,
+        "credal_sets": {node: families.fitted_cpt(node, best.predecessors(node)) for node in nodes},
     }

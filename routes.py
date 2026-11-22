@@ -297,7 +297,7 @@ def run_med_data_experiments():
 def summarise_experiment_results():
     try:
 
-        summarise_application_results()
+        summarise_application_results("results_rq1_med", "results_rq1_med.csv")
 
         return {
             "status": "success",

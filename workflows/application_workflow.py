@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import random
 
-from workflows.app_lcn_gen import generate_basic_lcn, load_dataset, optimize_lcn_bic, optimize_lcn_ibic
+from workflows.app_lcn_gen import generate_basic_lcn, optimize_lcn_bic, optimize_lcn_ibic
 from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 from pgmpy.factors.discrete import TabularCPD
 
@@ -95,7 +95,7 @@ def _format_config_key(parents, config):
 
 
 
-def _build_bn(lcn, mode="mid"):
+def _build_bn(lcn, mode="mid", *, complementary=False):
     """
     Builds a PGMPY ready bayesian network
     """
@@ -122,7 +122,7 @@ def _build_bn(lcn, mode="mid"):
             p_true = _extract_prob(dist["True"], mode)
             p_false = _extract_prob(dist["False"], mode)
 
-            p_true, p_false = _normalize(p_true, p_false)
+            p_true, p_false = (p_true, 1 - p_true) if complementary else _normalize(p_true, p_false)
 
             cpd = TabularCPD(
                 variable=node,
@@ -153,7 +153,7 @@ def _build_bn(lcn, mode="mid"):
                 p_true = _extract_prob(dist["True"], mode)
                 p_false = _extract_prob(dist["False"], mode)
 
-                p_true, p_false = _normalize(p_true, p_false)
+                p_true, p_false = (p_true, 1 - p_true) if complementary else _normalize(p_true, p_false)
 
             true_row.append(p_true)
             false_row.append(p_false)
@@ -250,15 +250,15 @@ def _build_bn_fully_random(lcn, seed=None):
     return model
 
 
-def convert_lcn_to_bn(lcn):
+def convert_lcn_to_bn(lcn, *, complementary=False):
     """
     Converts LCN into 3 Bayesian Networks:
     low, mid, high (based on credal interval)
     """
 
-    low_bn = _build_bn(lcn, mode="low")
-    mid_bn = _build_bn(lcn, mode="mid")
-    high_bn = _build_bn(lcn, mode="high")
+    low_bn = _build_bn(lcn, mode="low", complementary=complementary)
+    mid_bn = _build_bn(lcn, mode="mid", complementary=complementary)
+    high_bn = _build_bn(lcn, mode="high", complementary=complementary)
 
     return low_bn, mid_bn, high_bn
 
@@ -352,7 +352,7 @@ def run_predictions(bns, targets, df):
     prediction_results/{bn_name}_{target}.json
     """
 
-    base_dir = "prediction_results"
+    base_dir = "results_rq1_med"
     os.makedirs(base_dir, exist_ok=True)
 
     results = {}
@@ -398,32 +398,26 @@ def run_application_workflow(csv_data):
     Then test predication on the data and see which optimisation approach worked best i.e
     using the IBIC vs BIC
 
-    Note: Most steps have been commented out due to using saved json versions
     """
-    
-
-    # Step 1: Load data and generate initial LCN graph 
-    # Df is a dataframe of the csv data 
-    # initial_lcn, df = generate_initial_lcn_graph(csv_data)
-    df = load_dataset(csv_data)
-
-    # Step 2: Optimize initial graph using BIC
-    # bic_lcn = optimize_lcn_bic(initial_lcn, df)
-    # save_lcn_to_json(bic_lcn, "med_lcns/med_bic_lcn.json")
-    bic_lcn = load_lcn_from_json("med_lcns/med_bic_lcn.json")
-
-    # Step 3: Optimize initial graph using IBIC
-    # ibic_lcn = run_lcn_ibic_optimization(initial_lcn, df)
-    # save_lcn_to_json(ibic_lcn, "med_lcns/med_ibic_lcn.json")
-    ibic_lcn = load_lcn_from_json("med_lcns/med_ibic_lcn.json")
-
+    # Change done: learn IBIC from this CSV on every run. Cached legacy IBIC
+    # graphs bypass the revised score. Keep the established BIC comparator if available.
+    initial_lcn, df = generate_initial_lcn_graph(csv_data)
+    bic_path = "med_lcns/med_bic_lcn.json"
+    if os.path.isfile(bic_path):
+        bic_lcn = load_lcn_from_json(bic_path)
+    else:
+        bic_lcn = run_lcn_bic_optimization(initial_lcn, df)
+    ibic_lcn = run_lcn_ibic_optimization(initial_lcn, df)
 
     # Step 4: Extract a Bayesian Networks from the lcn
-    # BIC optimised LCN case
-    bic_low_bn, bic_mid_bn, bic_high_bn = convert_lcn_to_bn(bic_lcn)
+    # Change done: use the selected P(True) and its complement for BIC too.
+    # Normalising both lower (or both upper) bounds can reverse LOW and HIGH.
+    bic_low_bn, bic_mid_bn, bic_high_bn = convert_lcn_to_bn(bic_lcn, complementary=True)
 
     # IBIC optimised LCN case
-    ibic_low_bn, ibic_mid_bn, ibic_high_bn = convert_lcn_to_bn(ibic_lcn)
+    # Change done: select P(True) from each fitted interval and use its complement
+    # for False so conversion preserves the endpoints used by the scorer.
+    ibic_low_bn, ibic_mid_bn, ibic_high_bn = convert_lcn_to_bn(ibic_lcn, complementary=True)
 
     # Step 5: Apply LCNs to the data to make predictions 
     bic_bn_low_predict = apply_graph_data_prediction(bic_low_bn, df, target="X14")
