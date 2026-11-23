@@ -6,7 +6,7 @@ __pycache__/
 
 # Ignore results
 results
-results_med
+results_rq1_med
 results_rq2
 med_results_rq2
 results_rq3*

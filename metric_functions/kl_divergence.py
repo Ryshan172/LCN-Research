@@ -1,4 +1,8 @@
+from itertools import product
+from math import fsum, prod
+
 import numpy as np
+from scipy.special import kl_div
 
 def log_prob_sample(model, sample_dict):
     """
@@ -53,3 +57,34 @@ def kl_divergence_from_samples(true_model, approx_model, samples_df):
         kl_sum += (logp - logq)
 
     return kl_sum / n
+
+
+# Change done: enumerate the fitted joint distributions for the small RQ1 networks.
+def _joint_masses(model, nodes):
+    model.check_model()
+    states = model.states
+    cpds = model.get_cpds()
+    masses = {}
+    for values in product(*(states[node] for node in nodes)):
+        assignment = dict(zip(nodes, values))
+        masses[values] = prod(
+            cpd.get_value(**{var: assignment[var] for var in cpd.variables})
+            for cpd in cpds
+        )
+    return masses
+
+
+def exact_kl_divergence(true_model, approx_model):
+    """Compute KL(true_model || approx_model) in nats by complete enumeration."""
+    nodes = tuple(true_model.nodes())
+    if set(nodes) != set(approx_model.nodes()):
+        raise ValueError("Exact KL requires both networks to contain the same variables.")
+    p = _joint_masses(true_model, nodes)
+    q = _joint_masses(approx_model, nodes)
+
+    # kl_div computes p log(p/q) - p + q. The correction sums to zero for
+    # normalized distributions. An omitted fitted state has probability zero.
+    total = fsum(kl_div(p.get(world, 0.0), q.get(world, 0.0)) for world in p.keys() | q.keys())
+    if total < -1e-14:
+        raise ArithmeticError(f"Unexpected negative exact KL divergence: {total}")
+    return 0.0 if total < 0.0 else total

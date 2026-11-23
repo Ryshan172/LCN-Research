@@ -1,11 +1,12 @@
 import itertools
 from lcn_functions.model import create_lcn
-from metric_functions.kl_divergence import kl_divergence_from_samples
+from metric_functions.kl_divergence import exact_kl_divergence
 from metric_functions.structural_hamming_distance import structural_hamming_distance_compare
 from sampler_functions.bn_topological import ancestral_sample_bn, build_precise_bn_from_lcn
 from sampler_functions.contingency_sampler import credal_aggregate_intervals, sample_dataset
 import pandas as pd
 from scoring_functions.interval_bic_derivation import compute_interval_BIC, compute_network_interval_BIC
+from scoring_functions.updated_ibic import RQ1FamilyScores, UnscorableRQ1Draw
 from structure_learning.hill_climbing import run_hillclimbing_bic, run_interval_bic_hillclimb
 from structure_learning.sim_anneal import run_simanneal_sa
 from pgmpy.models import DiscreteBayesianNetwork
@@ -122,18 +123,32 @@ def run_structural_hamming_distance(true_model, learned_bn_dict):
     }
 
 
-def interval_bic_structure_learn(credal_aggregate_table, lcn_forward_samples):
+def interval_bic_structure_learn(credal_aggregate_table, lcn_forward_samples, *, lcn=None, interval_width=0.2):
     """
     Run greedy hill climbing with interval BIC, returning three networks
     for lower, mid, and upper BIC.
     """
+    # Change done: use the run's full width for all candidate families and rankings.
+    # The reference network uses its supplied CPTs; aggregate-only callers use the legacy path.
+    families = None
+    if lcn is not None:
+        rules = lcn["logical_constraints"]
+        families = RQ1FamilyScores(lcn_forward_samples, rules, interval_width=interval_width)
+        reference = RQ1FamilyScores(lcn_forward_samples, rules, generating_lcn=lcn)
+        interval_per_node = {
+            node: reference.interval(node, parents) for node, parents in reference.parents.items()
+        }
+    else:
+        interval_per_node = compute_interval_BIC(credal_aggregate_table)
+
     results = {}
     for scoring in ['low', 'mid', 'high']:
-        edges, score = run_interval_bic_hillclimb(lcn_forward_samples, credal_aggregate_table, scoring)
+        edges, score = run_interval_bic_hillclimb(
+            lcn_forward_samples, credal_aggregate_table, scoring, family_scores=families
+        )
         results[scoring] = {'edges': edges, 'score': score}
 
-    # Compute the full network interval BIC from the contingency table
-    interval_per_node = compute_interval_BIC(credal_aggregate_table)
+    # Change done: report the generating network's interval separately from the learned scores.
     network_interval = compute_network_interval_BIC(interval_per_node)
 
     results['network_interval'] = network_interval  # [lower, upper]
@@ -162,7 +177,7 @@ def run_interval_lcn_shd(true_model, interval_bic_results):
 
 
 def build_bn_from_lcn_learned(interval_bic_results, baseline_bn, baseline_bn_samples):
-    # Since all 3 LCN-BNs from 'Interval BIC Results' have the same structure, just need to evaluate one (mid) 
+    # Change done: the RQ1 KL comparison evaluates the midpoint-selected structure.
     
     # Extract the learned BIC structure 
     lcn_edges = list(interval_bic_results['mid']['edges'])
@@ -192,18 +207,26 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
     Run each step of the workflow
     """
 
-    # (1) Generate LCN
-    gen_lcn = generate_lcn_with_params(size, interval_width, width_dist_type, in_degree)
-
-
-    # (2.1) Sample Baseline Bayesian Network
-    model, sampled_states = generate_baseline_bn(gen_lcn)
-    print('Model')
-    print(model)
-
-    
-    # (2.2) Sample LCN and create Contingency Table
-    lcn_aggregate_table, lcn_samples_df = contingency_sample_lcn(gen_lcn, num_samples)
+    # Change done: retry unscorable draws with the same settings, up to ten times.
+    # A valid lower endpoint of -inf is retained.
+    max_retries = 10
+    for retry_count in range(max_retries + 1):
+        gen_lcn = generate_lcn_with_params(size, interval_width, width_dist_type, in_degree)
+        model, sampled_states = generate_baseline_bn(gen_lcn)
+        lcn_aggregate_table, lcn_samples_df = contingency_sample_lcn(gen_lcn, num_samples)
+        try:
+            if lcn_samples_df.empty:
+                raise UnscorableRQ1Draw("No complete records survived the supplied implications")
+            interval_bic_results = interval_bic_structure_learn(
+                lcn_aggregate_table, lcn_samples_df, lcn=gen_lcn, interval_width=interval_width
+            )
+            if interval_bic_results["network_interval"][1] == float("-inf"):
+                raise UnscorableRQ1Draw("Every generating model excludes an observed record")
+            break
+        except UnscorableRQ1Draw as exc:
+            if retry_count == max_retries:
+                raise RuntimeError(f"RQ1 IBIC still unscorable after {retry_count} retries: {exc}") from exc
+            print(f"Retrying RQ1 draw ({retry_count + 1}/{max_retries}): {exc}")
 
 
     # (3.1) Ancestral Sampling Baseline BN
@@ -219,8 +242,7 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
     baseline_shd_results = run_structural_hamming_distance(model, learned_bn)
 
 
-    # (4.1) Learn LCN structure with interval BIC and heuristic approaches
-    interval_bic_results = interval_bic_structure_learn(lcn_aggregate_table, lcn_samples_df)
+    # (4.1) IBIC results from the accepted draw
     print('Interval BIC Results')
     print(interval_bic_results)
 
@@ -230,7 +252,8 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
     print(interval_lcn_shd_results)
 
 
-    # (5) Compute KL divergence between distributions 
+    # Change done: evaluate both learned BNs over all assignments of the baseline BN.
+    # Parameter fitting still uses the baseline records; KL uses the model probabilities.
 
     # (5.1) KL divergence between baseline BN and Learned BN 
 
@@ -249,10 +272,9 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
     # Fit parameters
     learned_bn_model.fit(bn_forward_samples)
 
-    kl_baseline_vs_learned = kl_divergence_from_samples(
+    kl_baseline_vs_learned = exact_kl_divergence(
         true_model=model,
-        approx_model=learned_bn_model,
-        samples_df=bn_forward_samples
+        approx_model=learned_bn_model
     )
 
     print("KL Baseline vs Learned BN")
@@ -265,10 +287,9 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
     lcn_learned_bn = build_bn_from_lcn_learned(interval_bic_results, model, bn_forward_samples)
 
     # Compute KL Divergence
-    kl_baseline_vs_lcn_learned = kl_divergence_from_samples(
+    kl_baseline_vs_lcn_learned = exact_kl_divergence(
         true_model=model,
-        approx_model=lcn_learned_bn,
-        samples_df=bn_forward_samples
+        approx_model=lcn_learned_bn
     )
 
     print("KL Baseline vs LCN-learned")
@@ -284,6 +305,8 @@ def run_workflow_config(size, interval_width, width_dist_type, in_degree, num_sa
             "width_dist_type": width_dist_type,
             "in_degree": in_degree,
             "num_samples": num_samples,
+            # Change done: record how many IBIC draws were rejected before this result.
+            "ibic_generation_retries": retry_count,
         },
         "lcn": gen_lcn,
         "baseline_bn": {

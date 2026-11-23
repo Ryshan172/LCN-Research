@@ -262,7 +262,7 @@ def summarise_experiment_results():
         # Summarising results of all experiments in results
         df = summarise_experiments_to_csv(
             input_dir="results",
-            output_csv="experiment_summary.csv"
+            output_csv="rq1_experiments_v2.csv"
         )
 
         return {
@@ -297,7 +297,7 @@ def run_med_data_experiments():
 def summarise_experiment_results():
     try:
 
-        summarise_application_results()
+        summarise_application_results("results_rq1_med", "results_rq1_med.csv")
 
         return {
             "status": "success",
