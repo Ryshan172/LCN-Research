@@ -410,9 +410,8 @@ def run_application_workflow(csv_data):
     ibic_lcn = run_lcn_ibic_optimization(initial_lcn, df)
 
     # Step 4: Extract a Bayesian Networks from the lcn
-    # Change done: use the selected P(True) and its complement for BIC too.
-    # Normalising both lower (or both upper) bounds can reverse LOW and HIGH.
-    bic_low_bn, bic_mid_bn, bic_high_bn = convert_lcn_to_bn(bic_lcn, complementary=True)
+    # The BIC comparator normalizes the selected True and False bounds together.
+    bic_low_bn, bic_mid_bn, bic_high_bn = convert_lcn_to_bn(bic_lcn)
 
     # IBIC optimised LCN case
     # Change done: select P(True) from each fitted interval and use its complement
