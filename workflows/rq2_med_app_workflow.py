@@ -1,8 +1,8 @@
-import itertools
+import random
 
 from utils.data_saving import save_experiment_to_json
 from workflow_helpers.generate_lcn_from_csv import generate_and_save_lcn
-from workflows.rq2_experiments import compute_edge_metrics, compute_kl, compute_shd, evaluate_interval_bic, generate_lcn, hill_climb, random_restart_hill_climb, sample_lcn, tabu_search
+from workflows.rq2_experiments import compute_edge_metrics, compute_kl, compute_shd, evaluate_interval_bic, generate_lcn, experiment_start, paired_trials, hill_climb, random_restart_hill_climb, sample_lcn, tabu_search
 from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.estimators import MaximumLikelihoodEstimator
 
@@ -15,6 +15,16 @@ Except that LCN is generated from medical data
 
 # ---------- EXPERIMENT RUNNER -------------
 
+def medical_rq2_model(size, interval_width, width_dist_type, in_degree):
+    return generate_and_save_lcn(
+        csv_path="medical_data.csv",
+        size=size,
+        interval_width=interval_width,
+        width_dist_type=width_dist_type,
+        in_degree=in_degree
+    )
+
+
 def run_rq2_med_experiment_steps(
     run_num,
     size,
@@ -24,25 +34,16 @@ def run_rq2_med_experiment_steps(
     num_samples,
     search_method="hill_climbing",
     mutation_type="edge_add",
-    mutation_strategy="standard"
+    mutation_strategy="standard",
+    trial_data=None,
+    start_seed=None,
 ):
-    # ----------------------------------------------------
-    # STEP 1: Generate a ground-truth LCN (data-generating model)
-    # ----------------------------------------------------
-    lcn = generate_and_save_lcn(
-        csv_path="medical_data.csv",
-        size=size,
-        interval_width=interval_width,
-        width_dist_type=width_dist_type,
-        in_degree=in_degree
-    )
-
-    # ----------------------------------------------------
-    # STEP 2: Sample data from the LCN
-    # - produces observed dataset (samples_df)
-    # - produces interval/credal aggregation statistics
-    # ----------------------------------------------------
-    samples_df, aggregate_table = sample_lcn(lcn, num_samples)
+    # Changed: A grid repeat shares the same data across all mutation strategies.
+    if trial_data is None:
+        lcn = medical_rq2_model(size, interval_width, width_dist_type, in_degree)
+        samples_df, aggregate_table = sample_lcn(lcn, num_samples)
+    else:
+        lcn, samples_df, aggregate_table = trial_data
 
     # ----------------------------------------------------
     # STEP 3: Extract information available to learner
@@ -62,6 +63,11 @@ def run_rq2_med_experiment_steps(
 
     # Changed: Read the medical model's rules from its dictionary and pass its parent cap to each search.
     logical_constraints = lcn.get("logical_constraints", [])
+    if start_seed is None:
+        start_seed = random.getrandbits(32)
+    initial_edges, move_available = experiment_start(
+        nodes, logical_constraints, mutation_strategy, mutation_type, in_degree, start_seed
+    )
 
     # ----------------------------------------------------
     # STEP 4: Run structure learning (search phase)
@@ -77,6 +83,7 @@ def run_rq2_med_experiment_steps(
             nodes,
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
+            initial_edges=initial_edges,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
@@ -91,6 +98,7 @@ def run_rq2_med_experiment_steps(
             nodes,
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
+            initial_edges=initial_edges,
             mutation_type=mutation_type,
             mutation_strategy=mutation_strategy
         )
@@ -103,6 +111,7 @@ def run_rq2_med_experiment_steps(
             nodes,
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
+            initial_edges=initial_edges,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
@@ -181,6 +190,10 @@ def run_rq2_med_experiment_steps(
             "mutation_strategy": mutation_strategy
         },
         "structure": {
+            # Changed: Distinguish an immobile start from a feasible edit rejected by the score.
+            "start_seed": start_seed,
+            "initial_edges": initial_edges,
+            "initial_move_available": move_available,
             "learned_edges": best_edges,
             "shd": shd
         },
@@ -219,70 +232,58 @@ def rq2_med_experiments_variation_run():
 
     runs_per_config = 10
 
-    run_counter = 1
-    all_experiments = []
+    def make_model(size, in_degree):
+        return medical_rq2_model(size, interval_width, width_dist_type, in_degree)
 
-    # GRID
-    for size, in_degree, mutation_strategy in itertools.product(
-        sizes,
-        in_degrees,
-        mutation_strategies
-    ):
+    trials = paired_trials(sizes, in_degrees, mutation_strategies, mutation_types,
+                          runs_per_config, make_model, num_samples)
+    for (run_counter, size, in_degree, repeat_idx, mutation_strategy,
+         mutation_type, trial_data, start_seed) in trials:
+        print(
+            f"Run {run_counter} | "
+            f"size={size}, "
+            f"in_degree={in_degree}, "
+            f"strategy={mutation_strategy}, "
+            f"mutation={mutation_type}, "
+            f"repeat={repeat_idx + 1}"
+        )
 
-        # stratified cycle of mutation types per configuration
-        for repeat_idx in range(runs_per_config):
+        results = run_rq2_med_experiment_steps(
+            run_num=run_counter,
+            size=size,
+            interval_width=interval_width,
+            width_dist_type=width_dist_type,
+            in_degree=in_degree,
+            num_samples=num_samples,
+            search_method=search_method,
+            mutation_type=mutation_type,
+            mutation_strategy=mutation_strategy,
+            trial_data=trial_data,
+            start_seed=start_seed,
+        )
 
-            mutation_type = mutation_types[
-                repeat_idx % len(mutation_types)
-            ]
+        experiment_obj = {
+            "run_id": run_counter,
+            "repeat": repeat_idx + 1,
+            "params": {
+                "size": size,
+                "interval_width": interval_width,
+                "width_dist_type": width_dist_type,
+                "in_degree": in_degree,
+                "num_samples": num_samples,
+                "mutation_type": mutation_type,
+                "mutation_strategy": mutation_strategy,
+                "search_method": search_method
+            },
+            "results": results
+        }
 
-            print(
-                f"Run {run_counter} | "
-                f"size={size}, "
-                f"in_degree={in_degree}, "
-                f"strategy={mutation_strategy}, "
-                f"mutation={mutation_type}, "
-                f"repeat={repeat_idx + 1}"
-            )
+        save_experiment_to_json(
+            experiment_obj,
+            f"rq2_med_run_{run_counter}",
+            "med_results_rq2"
+        )
 
-            results = run_rq2_med_experiment_steps(
-                run_num=run_counter,
-                size=size,
-                interval_width=interval_width,
-                width_dist_type=width_dist_type,
-                in_degree=in_degree,
-                num_samples=num_samples,
-                search_method=search_method,
-                mutation_type=mutation_type,
-                mutation_strategy=mutation_strategy
-            )
-
-            experiment_obj = {
-                "run_id": run_counter,
-                "repeat": repeat_idx + 1,
-                "params": {
-                    "size": size,
-                    "interval_width": interval_width,
-                    "width_dist_type": width_dist_type,
-                    "in_degree": in_degree,
-                    "num_samples": num_samples,
-                    "mutation_type": mutation_type,
-                    "mutation_strategy": mutation_strategy,
-                    "search_method": search_method
-                },
-                "results": results
-            }
-
-            save_experiment_to_json(
-                experiment_obj,
-                f"rq2_med_run_{run_counter}",
-                "med_results_rq2"
-            )
-
-            # all_experiments.append(experiment_obj)
-            run_counter += 1
-
-    # return all_experiments
 
 
 def generate_med_test_lcn():

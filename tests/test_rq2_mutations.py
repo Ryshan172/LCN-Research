@@ -125,3 +125,60 @@ class RQ2MutationTests(unittest.TestCase):
                     run(size=3, interval_width=.3, width_dist_type="uniform", in_degree=0,
                         num_samples=10, mutation_strategy="constraint", **extra)
                 score.assert_not_called()
+
+
+class RQ2ExperimentStartTests(unittest.TestCase):
+    def test_starts_are_matched_and_preserve_the_fixed_edit(self):
+        nodes = ["X", "Y", "Z", "W"]
+        rules = [{"if": {"X": True}, "then": {"Y": True}}]
+        for edit in ["edge_delete", "edge_reverse", "edge_flip"]:
+            for cap in [1, 2]:
+                for seed in range(8):
+                    with self.subTest(edit=edit, cap=cap, seed=seed):
+                        edges, available = rq2.experiment_start(nodes, rules, "constraint", edit, cap, seed)
+                        self.assertEqual((edges, available), rq2.experiment_start(nodes, rules, "repair", edit, cap, seed))
+                        self.assertTrue(available)
+                        self.assertTrue(mutation.valid_dag(nodes, edges, cap))
+                        self.assertIn(("X", "Y"), edges)
+                        self.assertLessEqual(len(edges) - 1, len(nodes) - 1)
+                        state = rq2.initialise_structure(nodes, rules, "repair", cap, initial_edges=edges)
+                        changed = mutation.post_mutation_contraint_repair(
+                            state, state["constraint_index"], edit, edge=edges[-1]
+                        )
+                        self.assertIsNot(changed, state)
+                        self.assertIn(("X", "Y"), changed["edges"])
+
+    def test_addition_and_baseline_knowledge(self):
+        nodes = ["X", "Y", "Z"]
+        rules = [{"if": {"X": True}, "then": {"Y": True}}]
+        self.assertEqual(rq2.experiment_start(nodes, rules, "repair", "edge_add", 1, 0), ([("X", "Y")], True))
+        self.assertEqual(rq2.experiment_start(nodes, rules, "standard", "edge_add", 1, 0), ([], True))
+        for edit in ["edge_delete", "edge_reverse"]:
+            self.assertEqual(rq2.experiment_start(nodes, rules, "standard", edit, 1, 1),
+                             rq2.experiment_start(nodes, [], "standard", edit, 1, 1))
+
+    def test_distinguish_deletable_from_reversible_and_impossible(self):
+        nodes = ["X", "Y", "Z"]
+        rules = [{"if": {"X": True}, "then": {"Y": True}},
+                 {"if": {"Y": True}, "then": {"Z": True}}]
+        self.assertTrue(rq2.experiment_start(nodes, rules, "repair", "edge_delete", 2, 12)[1])
+        # Changed: X -> Z can be inserted but its reversal would close the required chain.
+        edges, available = rq2.experiment_start(nodes, rules, "repair", "edge_reverse", 2, 12)
+        self.assertFalse(available)
+        self.assertEqual(set(edges), {("X", "Y"), ("Y", "Z")})
+        for edit in ["edge_add", "edge_delete", "edge_reverse"]:
+            self.assertEqual(rq2.experiment_start(nodes, [], "standard", edit, 0, 12), ([], False))
+
+    def test_grid_shares_data_seed_and_preserves_run_ids(self):
+        from unittest.mock import Mock
+        make_model = Mock(side_effect=[{"nodes": []}, {"nodes": []}])
+        with patch.object(rq2, "sample_lcn", side_effect=[("d1", "a1"), ("d2", "a2")]) as sample:
+            trials = list(rq2.paired_trials([5], [1], ["standard", "constraint", "repair"],
+                                            ["edge_delete", "edge_reverse"], 2, make_model, 20))
+        self.assertEqual([trial[0] for trial in trials], [1, 3, 5, 2, 4, 6])
+        self.assertEqual(make_model.call_count, 2)
+        self.assertEqual(sample.call_count, 2)
+        for group in (trials[:3], trials[3:]):
+            for trial in group:
+                self.assertIs(trial[-2], group[0][-2])
+                self.assertEqual(trial[-1], group[0][-1])

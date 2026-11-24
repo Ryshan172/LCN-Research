@@ -1,5 +1,6 @@
 import pandas as pd
 import itertools
+import random
 import numpy as np
 import copy
 
@@ -70,7 +71,8 @@ def sample_lcn(lcn, num_samples):
 
 
 # -------- INITIAL STRUCTURE -------------------------
-def initialise_structure(nodes, logical_constraints=None, strategy="empty", max_in_degree=None):
+def initialise_structure(nodes, logical_constraints=None, strategy="empty", max_in_degree=None,
+                         initial_edges=None):
     """Build the initial graph state and rule index for structure learning.
 
     The state contains the supplied nodes, starting edges, an empty
@@ -78,7 +80,7 @@ def initialise_structure(nodes, logical_constraints=None, strategy="empty", max_
     index. Both constrained strategies receive the supplied rules directly;
     the learner does not need the generating graph to extract required arcs.
 
-    The standard baseline and the default "empty" strategy start with no
+    With no explicit starting graph, the baseline and the "empty" strategy start with no
     edges. The "constraint" and "repair" strategies start with exactly the
     rule-derived arcs so the first incumbent already satisfies the structural
     prior. Raise ValueError if the starting edges cannot form a DAG on the
@@ -87,9 +89,13 @@ def initialise_structure(nodes, logical_constraints=None, strategy="empty", max_
     """
     nodes = list(nodes)
     rules = logical_constraints or []
-    # Changed: Start rejection and repair at the required arcs and validate that start before scoring.
+    # Changed: Validate the supplied prior and any optional starting arcs before scoring.
     constrained = strategy in ("constraint", "repair")
-    edges = sorted(extract_constraint_dependencies(rules)) if constrained else []
+    required = extract_constraint_dependencies(rules) if constrained else set()
+    # Changed: An experiment may supply a feasible starting DAG with optional edges.
+    edges = sorted(required) if initial_edges is None else [tuple(edge) for edge in initial_edges]
+    if not required.issubset(edges):
+        raise ValueError("The starting graph is missing required arcs")
     if not valid_dag(nodes, edges, max_in_degree):
         raise ValueError(
             f"No feasible starting DAG on the supplied nodes with parent cap "
@@ -107,6 +113,49 @@ def initialise_structure(nodes, logical_constraints=None, strategy="empty", max_
     if strategy != "empty" or max_in_degree is not None:
         state["max_in_degree"] = max_in_degree
     return state
+
+
+def experiment_start(nodes, rules, strategy, mutation_type, max_in_degree, seed):
+    """Choose a start from the nodes and prior alone; return its edges and move availability."""
+    base = initialise_structure(nodes, rules, strategy, max_in_degree)["edges"]
+    pairs = list(itertools.permutations(nodes, 2))
+    if mutation_type == "edge_add":
+        available = any(valid_dag(nodes, base + [pair], max_in_degree) for pair in pairs)
+        return base, available
+    if mutation_type not in ("edge_delete", "edge_flip", "edge_reverse"):
+        raise ValueError(f"Unknown mutation type: {mutation_type}")
+
+    # Changed: Add up to n-1 optional arcs so fixed deletion/reversal runs can move.
+    # For a reversal both orientations must be legal at insertion: the last arc
+    # inserted can therefore still be reversed in the completed starting graph.
+    random.Random(seed).shuffle(pairs)
+    edges = list(base)
+    for u, v in pairs:
+        if not valid_dag(nodes, edges + [(u, v)], max_in_degree):
+            continue
+        if mutation_type != "edge_delete" and not valid_dag(nodes, edges + [(v, u)], max_in_degree):
+            continue
+        edges.append((u, v))
+        if len(edges) - len(base) == len(nodes) - 1:
+            break
+    return edges, len(edges) > len(base)
+
+
+def paired_trials(sizes, in_degrees, strategies, mutation_types, repeats, make_model, num_samples):
+    """Share the generating model, samples and start seed within each strategy comparison."""
+    # Changed: Retain the existing repeat schedule and run IDs, pairing inputs by construction.
+    first_id = 1
+    for size, in_degree in itertools.product(sizes, in_degrees):
+        for repeat_idx in range(repeats):
+            model = make_model(size, in_degree)
+            samples, aggregate = sample_lcn(model, num_samples)
+            trial_data = (model, samples, aggregate)
+            seed = random.getrandbits(32)
+            mutation_type = mutation_types[repeat_idx % len(mutation_types)]
+            for index, strategy in enumerate(strategies):
+                run_id = first_id + index * repeats + repeat_idx
+                yield run_id, size, in_degree, repeat_idx, strategy, mutation_type, trial_data, seed
+        first_id += len(strategies) * repeats
 
 
 # ----- MUTATION OPERATORS ------------
@@ -205,6 +254,7 @@ def hill_climb(
     scoring="mid",
     max_in_degree=None,
     record_noops=True,
+    initial_edges=None,
 ):
     """
     Greedy hill climbing using the selected
@@ -213,7 +263,8 @@ def hill_climb(
     """
 
     # Changed: Initialize the search with its chosen mutation policy and parent cap.
-    current = initialise_structure(nodes, logical_constraints, mutation_strategy, max_in_degree)
+    current = initialise_structure(nodes, logical_constraints, mutation_strategy, max_in_degree,
+                                   initial_edges=initial_edges)
 
     current_score = score_structure(
         current,
@@ -272,6 +323,7 @@ def random_restart_hill_climb(
     n_restarts=10,
     max_iter=50,
     max_in_degree=None,
+    initial_edges=None,
 ):
     """
     Random restart hill climbing over full LCN state.
@@ -299,6 +351,7 @@ def random_restart_hill_climb(
             max_iter=max_iter,
             # Changed: Enforce the same parent cap at every restart.
             max_in_degree=max_in_degree,
+            initial_edges=initial_edges,
         )
 
         final_score = traj[-1]
@@ -322,13 +375,15 @@ def tabu_search(
     tabu_size=10,
     max_iter=100,
     max_in_degree=None,
+    initial_edges=None,
 ):
     """
     Tabu search over FULL LCN state.
     """
 
     # Changed: Initialize the search with its chosen mutation policy and parent cap.
-    current = initialise_structure(nodes, logical_constraints, mutation_strategy, max_in_degree)
+    current = initialise_structure(nodes, logical_constraints, mutation_strategy, max_in_degree,
+                                   initial_edges=initial_edges)
 
     current_score = score_structure(current, samples_df, aggregate_table)
 
@@ -455,19 +510,16 @@ def run_experiment_steps(
     num_samples,
     search_method="hill_climbing",
     mutation_type="edge_add",
-    mutation_strategy="standard"
+    mutation_strategy="standard",
+    trial_data=None,
+    start_seed=None,
 ):
-    # ----------------------------------------------------
-    # STEP 1: Generate a ground-truth LCN (data-generating model)
-    # ----------------------------------------------------
-    lcn = generate_lcn(size, interval_width, width_dist_type, in_degree)
-
-    # ----------------------------------------------------
-    # STEP 2: Sample data from the LCN
-    # - produces observed dataset (samples_df)
-    # - produces interval/credal aggregation statistics
-    # ----------------------------------------------------
-    samples_df, aggregate_table = sample_lcn(lcn, num_samples)
+    # Changed: A grid repeat shares the same data across all mutation strategies.
+    if trial_data is None:
+        lcn = generate_lcn(size, interval_width, width_dist_type, in_degree)
+        samples_df, aggregate_table = sample_lcn(lcn, num_samples)
+    else:
+        lcn, samples_df, aggregate_table = trial_data
 
     # ----------------------------------------------------
     # STEP 3: Extract information available to learner
@@ -487,6 +539,11 @@ def run_experiment_steps(
 
     # Changed: Read rules from the generated model dictionary and pass the configured cap to each search.
     logical_constraints = lcn.get("logical_constraints", [])
+    if start_seed is None:
+        start_seed = random.getrandbits(32)
+    initial_edges, move_available = experiment_start(
+        nodes, logical_constraints, mutation_strategy, mutation_type, in_degree, start_seed
+    )
 
     # ----------------------------------------------------
     # STEP 4: Run structure learning (search phase)
@@ -502,6 +559,7 @@ def run_experiment_steps(
             nodes,
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
+            initial_edges=initial_edges,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
@@ -516,6 +574,7 @@ def run_experiment_steps(
             nodes,
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
+            initial_edges=initial_edges,
             mutation_type=mutation_type,
             mutation_strategy=mutation_strategy
         )
@@ -528,6 +587,7 @@ def run_experiment_steps(
             nodes,
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
+            initial_edges=initial_edges,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
@@ -606,6 +666,10 @@ def run_experiment_steps(
             "mutation_strategy": mutation_strategy
         },
         "structure": {
+            # Changed: Distinguish an immobile start from a feasible edit rejected by the score.
+            "start_seed": start_seed,
+            "initial_edges": initial_edges,
+            "initial_move_available": move_available,
             "learned_edges": best_edges,
             "shd": shd
         },
@@ -673,74 +737,62 @@ def rq2_experiment_run_variants_simple():
 
     runs_per_config = 10
 
-    run_counter = 1
-    all_experiments = []
+    def make_model(size, in_degree):
+        return generate_lcn(size, interval_width, width_dist_type, in_degree)
 
-    # GRID
-    for size, in_degree, mutation_strategy in itertools.product(
-        sizes,
-        in_degrees,
-        mutation_strategies
-    ):
+    trials = paired_trials(sizes, in_degrees, mutation_strategies, mutation_types,
+                          runs_per_config, make_model, num_samples)
+    for (run_counter, size, in_degree, repeat_idx, mutation_strategy,
+         mutation_type, trial_data, start_seed) in trials:
+        print(
+            f"Run {run_counter} | "
+            f"size={size}, "
+            f"in_degree={in_degree}, "
+            f"strategy={mutation_strategy}, "
+            f"mutation={mutation_type}, "
+            f"repeat={repeat_idx + 1}"
+        )
 
-        # stratified cycle of mutation types per configuration
-        for repeat_idx in range(runs_per_config):
+        results = run_experiment_steps(
+            size=size,
+            interval_width=interval_width,
+            width_dist_type=width_dist_type,
+            in_degree=in_degree,
+            num_samples=num_samples,
+            search_method=search_method,
+            mutation_type=mutation_type,
+            mutation_strategy=mutation_strategy,
+            trial_data=trial_data,
+            start_seed=start_seed,
+        )
 
-            mutation_type = mutation_types[
-                repeat_idx % len(mutation_types)
-            ]
+        experiment_obj = {
+            "run_id": run_counter,
+            "repeat": repeat_idx + 1,
+            "params": {
+                "size": size,
+                "interval_width": interval_width,
+                "width_dist_type": width_dist_type,
+                "in_degree": in_degree,
+                "num_samples": num_samples,
+                "mutation_type": mutation_type,
+                "mutation_strategy": mutation_strategy,
+                "search_method": search_method
+            },
+            "results": results
+        }
 
-            print(
-                f"Run {run_counter} | "
-                f"size={size}, "
-                f"in_degree={in_degree}, "
-                f"strategy={mutation_strategy}, "
-                f"mutation={mutation_type}, "
-                f"repeat={repeat_idx + 1}"
-            )
+        save_experiment_to_json(
+            experiment_obj,
+            f"rq2_run_{run_counter}",
+            "results_rq2"
+        )
 
-            results = run_experiment_steps(
-                size=size,
-                interval_width=interval_width,
-                width_dist_type=width_dist_type,
-                in_degree=in_degree,
-                num_samples=num_samples,
-                search_method=search_method,
-                mutation_type=mutation_type,
-                mutation_strategy=mutation_strategy
-            )
-
-            experiment_obj = {
-                "run_id": run_counter,
-                "repeat": repeat_idx + 1,
-                "params": {
-                    "size": size,
-                    "interval_width": interval_width,
-                    "width_dist_type": width_dist_type,
-                    "in_degree": in_degree,
-                    "num_samples": num_samples,
-                    "mutation_type": mutation_type,
-                    "mutation_strategy": mutation_strategy,
-                    "search_method": search_method
-                },
-                "results": results
-            }
-
-            save_experiment_to_json(
-                experiment_obj,
-                f"rq2_run_{run_counter}",
-                "results_rq2"
-            )
-
-            # all_experiments.append(experiment_obj)
-            run_counter += 1
-
-    # return all_experiments
 
 """
 CHECK
 - mutations cannot create cycles,
-- delete/reverse mutations behave sensibly from an empty graph,
+- delete/reverse experiments start with legal optional arcs whenever possible,
 - regroup_for_parents() truly reproduces the same regrouping used in the original
 """
 
@@ -787,6 +839,9 @@ def summarise_rq2_results(
         row = {
             # identifiers
             "run_id": data.get("run_id"),
+            # Changed: Older result files have no starting-graph diagnostics.
+            "initial_move_available": structure.get("initial_move_available"),
+            "initial_edge_count": len(structure["initial_edges"]) if "initial_edges" in structure else None,
             "repeat": data.get("repeat"),
 
             # experiment params
