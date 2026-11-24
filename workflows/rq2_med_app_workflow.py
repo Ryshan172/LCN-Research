@@ -60,11 +60,8 @@ def run_rq2_med_experiment_steps(
     # nodes = list(lcn.nodes())
     nodes = lcn["nodes"]
 
-    logical_constraints = getattr(
-        lcn,
-        "logical_constraints",
-        []
-    )
+    # Changed: Read the medical model's rules from its dictionary and pass its parent cap to each search.
+    logical_constraints = lcn.get("logical_constraints", [])
 
     # ----------------------------------------------------
     # STEP 4: Run structure learning (search phase)
@@ -79,6 +76,7 @@ def run_rq2_med_experiment_steps(
             aggregate_table,
             nodes,
             logical_constraints=logical_constraints,
+            max_in_degree=in_degree,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
@@ -92,6 +90,7 @@ def run_rq2_med_experiment_steps(
             aggregate_table,
             nodes,
             logical_constraints=logical_constraints,
+            max_in_degree=in_degree,
             mutation_type=mutation_type,
             mutation_strategy=mutation_strategy
         )
@@ -103,6 +102,7 @@ def run_rq2_med_experiment_steps(
             aggregate_table,
             nodes,
             logical_constraints=logical_constraints,
+            max_in_degree=in_degree,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )

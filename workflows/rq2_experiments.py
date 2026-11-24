@@ -8,7 +8,10 @@ import json
 import pandas as pd
 
 from lcn_functions.model import create_lcn
-from mutations.mutation_functions import standard_mutation, constraint_aware_mutation, post_mutation_contraint_repair
+from mutations.mutation_functions import (
+    constraint_aware_mutation, extract_constraint_dependencies,
+    post_mutation_contraint_repair, standard_mutation, valid_dag,
+)
 from sampler_functions.contingency_sampler import sample_dataset, credal_aggregate_intervals
 from metric_functions.structural_hamming_distance import structural_hamming_distance_compare
 from metric_functions.kl_divergence import kl_divergence_from_samples
@@ -29,14 +32,13 @@ RQ2: Heuristic Structure Learning over LCNs using Interval BIC
 
 #----- Helpers ------------------------------------------
 def build_constraint_index(logical_constraints):
-    """
-    Precompute constraint → variable index.
+    """Precompute the variable-to-rule index used by constraint-aware mutations.
 
-    WHY:
-    This enforces Assumption 2 (locality) in practice.
-
-    Instead of scanning ALL constraints per mutation,
-    we do O(1)-style lookup per affected node.
+    Register each rule under every variable in its "if" and "then" parts.
+    After a single-edge edit, the two endpoints identify which lists to
+    retrieve. This implements local rule lookup without scanning the full
+    constraint set each time. Reading a retrieved list still takes time
+    proportional to the number of rules it contains.
     """
 
     index = {}
@@ -68,46 +70,43 @@ def sample_lcn(lcn, num_samples):
 
 
 # -------- INITIAL STRUCTURE -------------------------
-def initialise_structure(
-    nodes,
-    logical_constraints=None,
-    strategy="empty"
-):
+def initialise_structure(nodes, logical_constraints=None, strategy="empty", max_in_degree=None):
+    """Build the initial graph state and rule index for structure learning.
+
+    The state contains the supplied nodes, starting edges, an empty
+    credal_sets dictionary, the domain rules and their variable-to-rule
+    index. Both constrained strategies receive the supplied rules directly;
+    the learner does not need the generating graph to extract required arcs.
+
+    The standard baseline and the default "empty" strategy start with no
+    edges. The "constraint" and "repair" strategies start with exactly the
+    rule-derived arcs so the first incumbent already satisfies the structural
+    prior. Raise ValueError if the starting edges cannot form a DAG on the
+    given nodes within max_in_degree. RQ2 carries this limit into mutation;
+    the default empty-state call without a cap keeps the legacy state format.
     """
-    Full LCN state initialisation.
-
-    IMPORTANT CHANGE:
-    We now build a constraint index so locality is REAL,
-    not just assumed in theory.
-
-    NEW:
-    Logical constraints can now be supplied from the
-    generated LCN.
-
-    This allows constraint-aware and repair mutations
-    to access domain knowledge while still starting
-    from an empty graph structure.
-    """
-
-    if logical_constraints is None:
-        logical_constraints = []
-
-    return {
-        "nodes": list(nodes),
-
-        # learner still starts from empty structure
-        "edges": [],
-
-        "credal_sets": {},
-
-        # domain knowledge supplied to learner
-        "logical_constraints": logical_constraints,
-
-        # locality support structure
-        "constraint_index": build_constraint_index(
-            logical_constraints
+    nodes = list(nodes)
+    rules = logical_constraints or []
+    # Changed: Start rejection and repair at the required arcs and validate that start before scoring.
+    constrained = strategy in ("constraint", "repair")
+    edges = sorted(extract_constraint_dependencies(rules)) if constrained else []
+    if not valid_dag(nodes, edges, max_in_degree):
+        raise ValueError(
+            f"No feasible starting DAG on the supplied nodes with parent cap "
+            f"{max_in_degree} and initial edges {edges}"
         )
+
+    state = {
+        "nodes": nodes,
+        "edges": edges,
+        "credal_sets": {},
+        "logical_constraints": rules,
+        "constraint_index": build_constraint_index(rules),
     }
+    # Changed: Carry the RQ2 parent cap into mutations while preserving the legacy empty-state format.
+    if strategy != "empty" or max_in_degree is not None:
+        state["max_in_degree"] = max_in_degree
+    return state
 
 
 # ----- MUTATION OPERATORS ------------
@@ -203,18 +202,18 @@ def hill_climb(
     mutation_strategy="standard",
     mutation_type="edge_add",
     max_iter=100,
-    scoring="mid"
+    scoring="mid",
+    max_in_degree=None,
+    record_noops=True,
 ):
     """
     Greedy hill climbing using the selected
-    Interval BIC scoring mode: low, mid, or high.
+    Interval BIC scoring mode: low, mid, or high. By default the trajectory has
+    an entry per iteration. With record_noops=False it has an entry per score call.
     """
 
-    # Updated to pass logical constraints as well
-    current = initialise_structure(
-        nodes,
-        logical_constraints=logical_constraints
-    )
+    # Changed: Initialize the search with its chosen mutation policy and parent cap.
+    current = initialise_structure(nodes, logical_constraints, mutation_strategy, max_in_degree)
 
     current_score = score_structure(
         current,
@@ -237,6 +236,11 @@ def hill_climb(
             mutation_type=mutation_type
         )
 
+        # Changed: Reuse the current score when mutation returns the incumbent.
+        if candidate is current:
+            if record_noops:
+                trajectory.append(current_score)
+            continue
         candidate_score = score_structure(
             candidate,
             samples_df,
@@ -266,7 +270,8 @@ def random_restart_hill_climb(
     mutation_type="edge_add",
     mutation_strategy="standard",
     n_restarts=10,
-    max_iter=50
+    max_iter=50,
+    max_in_degree=None,
 ):
     """
     Random restart hill climbing over full LCN state.
@@ -276,8 +281,6 @@ def random_restart_hill_climb(
     - mutation_strategy (standard / constraint / repair)
     - mutation_type (edge_add / delete / flip)
     """
-
-    # NOTE: Needs to be updated like Hill Climbing (TODO Later)
 
     best_overall = None
     best_score = -np.inf
@@ -293,7 +296,9 @@ def random_restart_hill_climb(
             logical_constraints=logical_constraints,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type,
-            max_iter=max_iter
+            max_iter=max_iter,
+            # Changed: Enforce the same parent cap at every restart.
+            max_in_degree=max_in_degree,
         )
 
         final_score = traj[-1]
@@ -315,17 +320,15 @@ def tabu_search(
     mutation_strategy="standard",
     mutation_type="edge_add",
     tabu_size=10,
-    max_iter=100
+    max_iter=100,
+    max_in_degree=None,
 ):
     """
     Tabu search over FULL LCN state.
     """
 
-    # Updated because of logical constraints 
-    current = initialise_structure(
-    nodes,
-        logical_constraints=logical_constraints
-    )
+    # Changed: Initialize the search with its chosen mutation policy and parent cap.
+    current = initialise_structure(nodes, logical_constraints, mutation_strategy, max_in_degree)
 
     current_score = score_structure(current, samples_df, aggregate_table)
 
@@ -342,6 +345,11 @@ def tabu_search(
             strategy=mutation_strategy,
             mutation_type=mutation_type
         )
+
+        # Changed: Reuse the current score when mutation returns the incumbent.
+        if candidate is current:
+            trajectory.append(current_score)
+            continue
 
         # Tabu check (structure-level comparison)
         if any(candidate["edges"] == t["edges"] for t in tabu_list):
@@ -477,11 +485,8 @@ def run_experiment_steps(
     # nodes = list(lcn.nodes())
     nodes = lcn["nodes"]
 
-    logical_constraints = getattr(
-        lcn,
-        "logical_constraints",
-        []
-    )
+    # Changed: Read rules from the generated model dictionary and pass the configured cap to each search.
+    logical_constraints = lcn.get("logical_constraints", [])
 
     # ----------------------------------------------------
     # STEP 4: Run structure learning (search phase)
@@ -496,6 +501,7 @@ def run_experiment_steps(
             aggregate_table,
             nodes,
             logical_constraints=logical_constraints,
+            max_in_degree=in_degree,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
@@ -509,6 +515,7 @@ def run_experiment_steps(
             aggregate_table,
             nodes,
             logical_constraints=logical_constraints,
+            max_in_degree=in_degree,
             mutation_type=mutation_type,
             mutation_strategy=mutation_strategy
         )
@@ -520,6 +527,7 @@ def run_experiment_steps(
             aggregate_table,
             nodes,
             logical_constraints=logical_constraints,
+            max_in_degree=in_degree,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )

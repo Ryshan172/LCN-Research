@@ -224,8 +224,13 @@ def seed_for(*parts):
 
 # ---------- SEARCH DISPATCH -------------
 def method_applicable(search_method, initialisation, scoring):
-    """
-    rq2_ghc always starts from the empty graph and scores with "mid".
+    """Check whether the search method supports the requested initialisation.
+
+    rq2_ghc constructs its own start: empty for standard mutation and the
+    required arcs for rejection or repair. The benchmark enables this method
+    under the "empty" initialisation setting because it cannot take an
+    externally supplied random start. Its default score is the IBIC midpoint;
+    the scoring argument does not filter configurations here.
     """
     if search_method == "rq2_ghc":
         return initialisation == "empty"
@@ -259,8 +264,8 @@ def run_search(
         # RQ2 hill_climb uses the global random module
         random.seed(seed)
 
-        # One score evaluation per iteration, so max_iter = budget - 1
-        # (the first evaluation scores the empty starting graph)
+        # The initial graph costs one evaluation. A later step costs at most one.
+        # Record only actual score calls for this evaluation-indexed benchmark.
         best_lcn, trajectory = hill_climb(
             samples_df,
             aggregate_table,
@@ -269,6 +274,8 @@ def run_search(
             mutation_strategy=mutation_strategy,
             mutation_type=rq2_mutation_type,
             max_iter=max_evaluations - 1,
+            # Changed: Index RQ3 evaluation counts and time-to-best by actual score calls.
+            record_noops=False,
             scoring=scoring
         )
 
