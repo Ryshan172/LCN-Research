@@ -21,6 +21,7 @@ from pgmpy.estimators import MaximumLikelihoodEstimator
 
 from scoring_functions.interval_bic_derivation import compute_interval_BIC
 from scoring_functions.scoring_helpers import regroup_for_parents
+from metric_functions.rq2_probability_sentences import evaluate_probability_sentences
 from utils.data_saving import save_experiment_to_json
 
 
@@ -674,6 +675,8 @@ def run_experiment_steps(
             "shd": shd
         },
         "edge_metrics": edge_metrics,
+        # Changed: Check probability sentences on the fitted BN after the search has finished.
+        "probability_sentences": evaluate_probability_sentences(learned_bn, lcn),
         "kl_divergence": kl,
         "interval_bic": bic_metrics,
         "trajectory": trajectory
@@ -809,7 +812,7 @@ def summarise_rq2_results(
     edge metrics (precision, recall, accuracy, f1),
     structure metrics (SHD, missing, extra, orientation errors),
     scoring metrics (KL divergence, IBIC stats),
-    trajectory summary stats.
+    trajectory summary stats and fitted-model probability-sentence metrics.
     """
 
     rows = []
@@ -828,6 +831,7 @@ def summarise_rq2_results(
         structure = results.get("structure", {})
         edge_metrics = results.get("edge_metrics", {})
         shd = structure.get("shd", {})
+        sentences = results.get("probability_sentences", {}).get("summary", {})
         ibic = results.get("interval_bic", {})
         trajectory = results.get("trajectory", [])
 
@@ -865,6 +869,18 @@ def summarise_rq2_results(
             "missing_edges": len(shd.get("missing", [])),
             "extra_edges": len(shd.get("extra", [])),
             "orientation_errors": shd.get("orientation_errors"),
+
+            # Changed: Leave these fields blank for earlier runs without fitted-model checks.
+            "any_rule_violation_probability": sentences.get("any_rule_violation_probability"),
+            "hard_rule_count": sentences.get("hard_rule_count"),
+            "hard_rule_zero_support": sentences.get("hard_rule_zero_support"),
+            "hard_rule_satisfied_supported": sentences.get("hard_rule_satisfied_supported"),
+            "hard_rule_satisfaction_rate": sentences.get("hard_rule_satisfaction_rate"),
+            "interval_row_count": sentences.get("interval_row_count"),
+            "interval_row_zero_support": sentences.get("interval_row_zero_support"),
+            "interval_row_satisfied_supported": sentences.get("interval_row_satisfied_supported"),
+            "interval_row_satisfaction_rate": sentences.get("interval_row_satisfaction_rate"),
+            "max_interval_violation": sentences.get("max_interval_violation"),
 
             # probabilistic / scoring metrics
             "kl_divergence": results.get("kl_divergence"),

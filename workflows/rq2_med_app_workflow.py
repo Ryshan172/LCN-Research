@@ -1,5 +1,6 @@
 import random
 
+from metric_functions.rq2_probability_sentences import evaluate_probability_sentences
 from utils.data_saving import save_experiment_to_json
 from workflow_helpers.generate_lcn_from_csv import generate_and_save_lcn
 from workflows.rq2_experiments import compute_edge_metrics, compute_kl, compute_shd, evaluate_interval_bic, generate_lcn, experiment_start, paired_trials, hill_climb, random_restart_hill_climb, sample_lcn, tabu_search
@@ -198,6 +199,8 @@ def run_rq2_med_experiment_steps(
             "shd": shd
         },
         "edge_metrics": edge_metrics,
+        # Changed: Check probability sentences on the fitted BN after the search has finished.
+        "probability_sentences": evaluate_probability_sentences(learned_bn, lcn),
         "kl_divergence": kl,
         "interval_bic": bic_metrics,
         "trajectory": trajectory
