@@ -10,7 +10,7 @@ from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
 from pgmpy.estimators import BIC as BicScore
 
 from lcn_functions.lcn_check import validate_generated_lcn
-from scoring_functions.updated_ibic import RQ1FamilyScores
+from scoring_functions.updated_ibic import IBICScorer
 from structure_learning.hill_climbing import _midpoint_rank
 import networkx as nx
 
@@ -416,7 +416,7 @@ def optimize_lcn_ibic(initial_lcn, df, max_iters=100, max_parents=2, *, interval
     rules = initial_lcn["logical_constraints"]
     # Change done: score every mutation on the same observed records using RQ1's
     # propagated full width. Previously each graph generated a different sample.
-    families = RQ1FamilyScores(df[nodes], rules, interval_width=interval_width)
+    families = IBICScorer(df[nodes], rules, interval_width=interval_width)
     best = nx.DiGraph()
     best.add_nodes_from(nodes)
     best.add_edges_from(initial_lcn["edges"])

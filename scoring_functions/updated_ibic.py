@@ -56,7 +56,7 @@ def _empirical_bounds(n_true, n, interval_width):
     return max(0.0, centre - radius), min(1.0, centre + radius)
 
 
-class RQ1FamilyScores:
+class IBICScorer:
     """Score independent CPT rows after enforcing the supplied hard implications.
 
     Search fits each candidate family from complete records. With a generating
@@ -192,3 +192,7 @@ class RQ1FamilyScores:
             high += row_high
         penalty = 0.5 * dimension * log(len(self.data))
         return low - penalty, high - penalty
+
+
+# Changed: Keep historical notebook imports working under the new shared scorer name.
+RQ1FamilyScores = IBICScorer

@@ -6,7 +6,7 @@ from sampler_functions.bn_topological import ancestral_sample_bn, build_precise_
 from sampler_functions.contingency_sampler import credal_aggregate_intervals, sample_dataset
 import pandas as pd
 from scoring_functions.interval_bic_derivation import compute_interval_BIC, compute_network_interval_BIC
-from scoring_functions.updated_ibic import RQ1FamilyScores, UnscorableRQ1Draw
+from scoring_functions.updated_ibic import IBICScorer, UnscorableRQ1Draw
 from structure_learning.hill_climbing import run_hillclimbing_bic, run_interval_bic_hillclimb
 from structure_learning.sim_anneal import run_simanneal_sa
 from pgmpy.models import DiscreteBayesianNetwork
@@ -133,8 +133,8 @@ def interval_bic_structure_learn(credal_aggregate_table, lcn_forward_samples, *,
     families = None
     if lcn is not None:
         rules = lcn["logical_constraints"]
-        families = RQ1FamilyScores(lcn_forward_samples, rules, interval_width=interval_width)
-        reference = RQ1FamilyScores(lcn_forward_samples, rules, generating_lcn=lcn)
+        families = IBICScorer(lcn_forward_samples, rules, interval_width=interval_width)
+        reference = IBICScorer(lcn_forward_samples, rules, generating_lcn=lcn)
         interval_per_node = {
             node: reference.interval(node, parents) for node, parents in reference.parents.items()
         }

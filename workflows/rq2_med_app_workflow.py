@@ -3,7 +3,7 @@ import random
 from metric_functions.rq2_probability_sentences import evaluate_probability_sentences
 from utils.data_saving import save_experiment_to_json
 from workflow_helpers.generate_lcn_from_csv import generate_and_save_lcn
-from workflows.rq2_experiments import compute_edge_metrics, compute_kl, compute_shd, evaluate_interval_bic, generate_lcn, experiment_start, paired_trials, hill_climb, random_restart_hill_climb, sample_lcn, tabu_search
+from workflows.rq2_experiments import compute_edge_metrics, compute_kl, compute_shd, rq2_ibic_results, rq2_family_scores, generate_lcn, experiment_start, paired_trials, hill_climb, random_restart_hill_climb, sample_lcn, tabu_search
 from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.estimators import MaximumLikelihoodEstimator
 
@@ -75,6 +75,10 @@ def run_rq2_med_experiment_steps(
     # - chooses optimisation strategy (HC / RR / Tabu)
     # - returns best learned structure + score trajectory
     # ----------------------------------------------------
+    # Changed: All three searches share one RQ1 scorer per run, using the
+    # experiment's full interval width and no generating-network CPTs.
+    families = rq2_family_scores(samples_df, logical_constraints, mutation_strategy, interval_width)
+    upper_trajectory = []
     if search_method == "hill_climbing":
         
         # Hill Climbing call Including logical constraints as well
@@ -85,6 +89,8 @@ def run_rq2_med_experiment_steps(
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
             initial_edges=initial_edges,
+            family_scores=families,
+            upper_trajectory=upper_trajectory,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
@@ -100,6 +106,8 @@ def run_rq2_med_experiment_steps(
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
             initial_edges=initial_edges,
+            family_scores=families,
+            upper_trajectory=upper_trajectory,
             mutation_type=mutation_type,
             mutation_strategy=mutation_strategy
         )
@@ -113,6 +121,8 @@ def run_rq2_med_experiment_steps(
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
             initial_edges=initial_edges,
+            family_scores=families,
+            upper_trajectory=upper_trajectory,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
@@ -131,7 +141,13 @@ def run_rq2_med_experiment_steps(
     # - how fast it converged
     # - stability of search trajectory
     # ----------------------------------------------------
-    bic_metrics = evaluate_interval_bic(trajectory)
+    bic_metrics, trajectory = rq2_ibic_results(trajectory)
+    # Changed: Record the secondary score even while the primary remains unbounded.
+    upper_trajectory = ["-Infinity" if x == float("-inf") else x for x in upper_trajectory]
+    bic_metrics["midpoint_tie_break"] = "upper_when_both_negative_infinity"
+    best_upper = sum(families.interval(node, [a for a, b in best_edges if b == node])[1]
+                     for node in nodes)
+    bic_metrics["selected_upper_score"] = "-Infinity" if best_upper == float("-inf") else best_upper
 
     # ----------------------------------------------------
     # STEP 7: Structural comparison to ground truth
@@ -203,6 +219,7 @@ def run_rq2_med_experiment_steps(
         "probability_sentences": evaluate_probability_sentences(learned_bn, lcn),
         "kl_divergence": kl,
         "interval_bic": bic_metrics,
+        "upper_trajectory": upper_trajectory,
         "trajectory": trajectory
     }
 

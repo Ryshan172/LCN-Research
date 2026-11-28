@@ -169,6 +169,24 @@ class RQ2ExperimentStartTests(unittest.TestCase):
         for edit in ["edge_add", "edge_delete", "edge_reverse"]:
             self.assertEqual(rq2.experiment_start(nodes, [], "standard", edit, 0, 12), ([], False))
 
+    def test_conflicting_draw_is_replaced_before_any_strategy_runs(self):
+        import pandas as pd
+        from unittest.mock import Mock
+
+        first = {"if": {"X1": False}, "then": {"X5": True}}
+        second = {"if": {"X2": True}, "then": {"X5": False}}
+        nodes = ["X1", "X2", "X5"]
+        bad = {"nodes": nodes, "logical_constraints": [first, second]}
+        good = {"nodes": nodes, "logical_constraints": [first]}
+        sampled = pd.DataFrame([[True, True, False]], columns=nodes)
+        make = Mock(side_effect=[bad, good])
+        with patch.object(rq2, "sample_lcn", return_value=(sampled, None)):
+            trials = list(rq2.paired_trials([3], [2], ["standard", "constraint", "repair"],
+                                            ["edge_add"], 1, make, 20))
+        self.assertEqual(make.call_count, 2)
+        self.assertEqual([row[0] for row in trials], [1, 2, 3])
+        self.assertTrue(all(row[-2][0] is good for row in trials))
+
     def test_grid_shares_data_seed_and_preserves_run_ids(self):
         from unittest.mock import Mock
         make_model = Mock(side_effect=[{"nodes": []}, {"nodes": []}])
@@ -182,3 +200,66 @@ class RQ2ExperimentStartTests(unittest.TestCase):
             for trial in group:
                 self.assertIs(trial[-2], group[0][-2])
                 self.assertEqual(trial[-1], group[0][-1])
+
+
+class RQ2IBICParityTests(unittest.TestCase):
+    # Changed: Compare the graph scores used by RQ2 with RQ1's search scorer
+    # on identical data, including the rule-free baseline and two widths.
+    def test_scores_match_rq1_for_each_strategy_and_mode(self):
+        import pandas as pd
+        from scoring_functions.updated_ibic import IBICScorer
+        from structure_learning.hill_climbing import IntervalBICScore
+
+        data = pd.DataFrame([(0, 0), (0, 1), (1, 1), (1, 1)], columns=["X", "Y"])
+        rules = [{"if": {"X": True}, "then": {"Y": True}}]
+        for strategy in ("standard", "constraint", "repair"):
+            state = rq2.initialise_structure(data.columns, rules, strategy, 1,
+                                             initial_edges=[("X", "Y")])
+            for width in (0, 0.3):
+                actual = rq2.rq2_family_scores(data, rules, strategy, width)
+                expected = IBICScorer(data, [] if strategy == "standard" else rules,
+                                           interval_width=width)
+                for mode in ("low", "mid", "high"):
+                    with self.subTest(strategy=strategy, width=width, mode=mode):
+                        rq1 = IntervalBICScore(data, None, scoring=mode, family_scores=expected)
+                        reference = rq1.local_score("X", []) + rq1.local_score("Y", ["X"])
+                        self.assertEqual(rq2.score_structure(state, data, None, mode,
+                                                             family_scores=actual), reference)
+
+    def test_upper_endpoint_crosses_plateau_before_midpoint_becomes_finite(self):
+        import pandas as pd
+        pair = [(0, 0)] * 80 + [(1, 0)] * 16 + [(1, 1)] * 4
+        data = pd.DataFrame([left + right for left in pair for right in pair],
+                            columns=["A", "Y", "B", "Z"])
+        families = rq2.rq2_family_scores(data, [], "standard", 0.2)
+        for search in (rq2.hill_climb, rq2.tabu_search, rq2.random_restart_hill_climb):
+            edits = iter([("A", "Y"), ("B", "Z")])
+            def mutate(state, **kwargs):
+                return dict(state, edges=state["edges"] + [next(edits)])
+            upper = []
+            with patch.object(rq2, "mutate_lcn", side_effect=mutate):
+                best, mid = search(data, None, list(data), max_iter=2, family_scores=families,
+                                   upper_trajectory=upper,
+                                   **({"n_restarts": 1} if search == rq2.random_restart_hill_climb else {}))
+            self.assertEqual(mid[:2], [float("-inf")] * 2)
+            self.assertGreater(upper[1], upper[0])
+            self.assertGreater(mid[2], mid[1])
+            self.assertEqual(best["edges"], [("A", "Y"), ("B", "Z")])
+        self.assertFalse(rq2._improves((1, 5), (1, 2)))
+        self.assertFalse(rq2._improves((float("-inf"), 1e-12), (float("-inf"), 0)))
+
+    def test_unbounded_restarts_keep_a_graph_and_save_the_actual_score(self):
+        import json
+        import pandas as pd
+
+        data = pd.DataFrame({"X": [False] * 19 + [True]})
+        families = rq2.rq2_family_scores(data, [], "standard", 0.3)
+        graph, trajectory = rq2.random_restart_hill_climb(
+            data, None, ["X"], n_restarts=2, max_iter=1, family_scores=families)
+        self.assertEqual(graph["edges"], [])
+        self.assertEqual(trajectory, [float("-inf")] * 4)
+        metrics, saved = rq2.rq2_ibic_results(trajectory)
+        json.dumps([metrics, saved], allow_nan=False)
+        self.assertEqual(saved, ["-Infinity"] * 4)
+        self.assertEqual(metrics["best_score"], "-Infinity")
+        self.assertIsNone(metrics["stability"])

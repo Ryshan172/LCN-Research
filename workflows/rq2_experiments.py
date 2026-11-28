@@ -19,6 +19,7 @@ from metric_functions.kl_divergence import kl_divergence_from_samples
 from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.estimators import MaximumLikelihoodEstimator
 
+from scoring_functions.updated_ibic import IBICScorer, UnscorableRQ1Draw
 from scoring_functions.interval_bic_derivation import compute_interval_BIC
 from scoring_functions.scoring_helpers import regroup_for_parents
 from metric_functions.rq2_probability_sentences import evaluate_probability_sentences
@@ -148,8 +149,28 @@ def paired_trials(sizes, in_degrees, strategies, mutation_types, repeats, make_m
     first_id = 1
     for size, in_degree in itertools.product(sizes, in_degrees):
         for repeat_idx in range(repeats):
-            model = make_model(size, in_degree)
-            samples, aggregate = sample_lcn(model, num_samples)
+            # Changed: Validate the whole draw before yielding even the standard
+            # arm. Resampling later would compare strategies on different data.
+            for attempt in range(1, 12):
+                model = make_model(size, in_degree)
+                samples, aggregate = sample_lcn(model, num_samples)
+                rules = model.get("logical_constraints", [])
+                try:
+                    if len(samples) == 0:
+                        raise UnscorableRQ1Draw("No sampled records satisfied the rules")
+                    if rules and any(s in ("constraint", "repair") for s in strategies):
+                        required = extract_constraint_dependencies(rules)
+                        if not valid_dag(model["nodes"], required, in_degree):
+                            raise UnscorableRQ1Draw("Required arcs violate the DAG or parent cap")
+                        # RQ1 checks joint rule support in its constructor. This
+                        # check is independent of width and does not rank graphs.
+                        IBICScorer(samples, rules)
+                    break
+                except UnscorableRQ1Draw as exc:
+                    context = f"size={size}, in_degree={in_degree}, repeat={repeat_idx + 1}"
+                    if attempt == 11:
+                        raise RuntimeError(f"No feasible RQ2 draw after 11 attempts ({context}): {exc}") from exc
+                    print(f"Redrawing infeasible RQ2 trial ({context}, attempt={attempt}): {exc}")
             trial_data = (model, samples, aggregate)
             seed = random.getrandbits(32)
             mutation_type = mutation_types[repeat_idx % len(mutation_types)]
@@ -186,19 +207,46 @@ def mutate_lcn(lcn_state, strategy="standard", mutation_type="edge_add"):
     
 
 # -------- SCORE FUNCTION ------------------
+def rq2_family_scores(samples_df, logical_constraints, strategy, interval_width):
+    """Create one RQ1 candidate-family cache for this RQ2 search and its restarts."""
+    # Changed: Rejection and repair score with the supplied implications; the
+    # standard baseline fits the same binary likelihood without domain rules.
+    rules = logical_constraints if strategy in ("constraint", "repair") else []
+    return IBICScorer(samples_df, rules, interval_width=interval_width)
+
+
 def score_structure(
     lcn_state,
     samples_df,
     aggregate_table,
-    scoring="mid"
+    scoring="mid",
+    *,
+    family_scores=None,
 ):
     """
     Structure-aware interval BIC score.
 
-    Equivalent to the pgmpy IntervalBICScore,
-    but for the custom LCN hill climber.
+    RQ2 passes the RQ1 scorer fitted to this run's complete observations.
+    The aggregate-only calling convention remains available to the RQ3 benchmark.
+    As in RQ1, sum the selected endpoint or midpoint across candidate families.
     """
 
+    if family_scores is not None:
+        # Changed: Match RQ1's sum of collapsed local scores, including its
+        # floating-point summation behaviour when candidate scores nearly tie.
+        parents = {node: [] for node in lcn_state["nodes"]}
+        for parent, child in lcn_state["edges"]:
+            parents[child].append(parent)
+        intervals = (family_scores.interval(node, family) for node, family in parents.items())
+        if scoring == "mid":
+            return sum((lower + upper) / 2 for lower, upper in intervals)
+        if scoring == "low":
+            return sum(lower for lower, upper in intervals)
+        if scoring == "high":
+            return sum(upper for lower, upper in intervals)
+        raise ValueError("scoring must be 'low', 'mid', or 'high'")
+
+    # The aggregate-only path below preserves the existing RQ3 benchmark.
     total_score = 0.0
 
     nodes = lcn_state["nodes"]
@@ -212,17 +260,8 @@ def score_structure(
             if child == node
         ]
 
-        df_regrouped = regroup_for_parents(
-            aggregate_table,
-            node,
-            parents
-        )
-
-        interval_bic = compute_interval_BIC(
-            df_regrouped
-        )
-
-        bic_lower, bic_upper = interval_bic[node]
+        df_regrouped = regroup_for_parents(aggregate_table, node, parents)
+        bic_lower, bic_upper = compute_interval_BIC(df_regrouped)[node]
 
         if scoring == "low":
             score = bic_lower
@@ -244,6 +283,23 @@ def score_structure(
 
 
 # -------- HILL CLIMBING CORE -------------------
+def _search_scores(state, samples, aggregate, scoring, families):
+    """Return the search objective and its upper endpoint for one candidate."""
+    primary = score_structure(state, samples, aggregate, scoring=scoring, family_scores=families)
+    if scoring == "mid" and families is not None:
+        upper = score_structure(state, samples, aggregate, scoring="high", family_scores=families)
+    else:
+        upper = primary
+    return primary, upper
+
+
+def _improves(candidate, incumbent):
+    # Changed: Follow RQ1 on a -infinity midpoint plateau. A finite tie stays
+    # a tie. The tolerance on upper-endpoint improvements matches RQ1.
+    return (candidate[0] > incumbent[0] or
+            (candidate[0] == incumbent[0] == -np.inf and candidate[1] > incumbent[1] + 1e-10))
+
+
 def hill_climb(
     samples_df,
     aggregate_table,
@@ -256,6 +312,8 @@ def hill_climb(
     max_in_degree=None,
     record_noops=True,
     initial_edges=None,
+    family_scores=None,
+    upper_trajectory=None,
 ):
     """
     Greedy hill climbing using the selected
@@ -267,17 +325,14 @@ def hill_climb(
     current = initialise_structure(nodes, logical_constraints, mutation_strategy, max_in_degree,
                                    initial_edges=initial_edges)
 
-    current_score = score_structure(
-        current,
-        samples_df,
-        aggregate_table,
-        scoring=scoring
-    )
+    current_score = _search_scores(current, samples_df, aggregate_table, scoring, family_scores)
 
     best = copy.deepcopy(current)
     best_score = current_score
 
-    trajectory = [current_score]
+    trajectory = [current_score[0]]
+    if upper_trajectory is not None:
+        upper_trajectory.append(current_score[1])
 
     for _ in range(max_iter):
 
@@ -291,24 +346,23 @@ def hill_climb(
         # Changed: Reuse the current score when mutation returns the incumbent.
         if candidate is current:
             if record_noops:
-                trajectory.append(current_score)
+                trajectory.append(current_score[0])
+                if upper_trajectory is not None:
+                    upper_trajectory.append(current_score[1])
             continue
-        candidate_score = score_structure(
-            candidate,
-            samples_df,
-            aggregate_table,
-            scoring=scoring
-        )
+        candidate_score = _search_scores(candidate, samples_df, aggregate_table, scoring, family_scores)
 
-        if candidate_score > current_score:
+        if _improves(candidate_score, current_score):
             current = candidate
             current_score = candidate_score
 
-            if candidate_score > best_score:
+            if _improves(candidate_score, best_score):
                 best = copy.deepcopy(candidate)
                 best_score = candidate_score
 
-        trajectory.append(current_score)
+        trajectory.append(current_score[0])
+        if upper_trajectory is not None:
+            upper_trajectory.append(current_score[1])
 
     return best, trajectory
 
@@ -325,6 +379,8 @@ def random_restart_hill_climb(
     max_iter=50,
     max_in_degree=None,
     initial_edges=None,
+    family_scores=None,
+    upper_trajectory=None,
 ):
     """
     Random restart hill climbing over full LCN state.
@@ -342,6 +398,7 @@ def random_restart_hill_climb(
     for _ in range(n_restarts):
 
         # Updated for updated Hill Climb
+        restart_upper = []
         result, traj = hill_climb(
             samples_df,
             aggregate_table,
@@ -353,12 +410,18 @@ def random_restart_hill_climb(
             # Changed: Enforce the same parent cap at every restart.
             max_in_degree=max_in_degree,
             initial_edges=initial_edges,
+            family_scores=family_scores,
+            upper_trajectory=restart_upper,
         )
 
-        final_score = traj[-1]
+        final_score = (traj[-1], restart_upper[-1])
+        if upper_trajectory is not None:
+            upper_trajectory.extend(restart_upper)
         full_trajectory.extend(traj)
 
-        if final_score > best_score:
+        # Changed: A genuine RQ1 midpoint can be -infinity for every restart.
+        # Keep the first completed graph even when there is no finite winner.
+        if best_overall is None or _improves(final_score, best_score):
             best_score = final_score
             best_overall = result
 
@@ -377,6 +440,8 @@ def tabu_search(
     max_iter=100,
     max_in_degree=None,
     initial_edges=None,
+    family_scores=None,
+    upper_trajectory=None,
 ):
     """
     Tabu search over FULL LCN state.
@@ -386,13 +451,15 @@ def tabu_search(
     current = initialise_structure(nodes, logical_constraints, mutation_strategy, max_in_degree,
                                    initial_edges=initial_edges)
 
-    current_score = score_structure(current, samples_df, aggregate_table)
+    current_score = _search_scores(current, samples_df, aggregate_table, "mid", family_scores)
 
     best = copy.deepcopy(current)
     best_score = current_score
 
     tabu_list = []
-    trajectory = [current_score]
+    trajectory = [current_score[0]]
+    if upper_trajectory is not None:
+        upper_trajectory.append(current_score[1])
 
     for _ in range(max_iter):
 
@@ -404,29 +471,33 @@ def tabu_search(
 
         # Changed: Reuse the current score when mutation returns the incumbent.
         if candidate is current:
-            trajectory.append(current_score)
+            trajectory.append(current_score[0])
+            if upper_trajectory is not None:
+                upper_trajectory.append(current_score[1])
             continue
 
         # Tabu check (structure-level comparison)
         if any(candidate["edges"] == t["edges"] for t in tabu_list):
             continue
 
-        candidate_score = score_structure(candidate, samples_df, aggregate_table)
+        candidate_score = _search_scores(candidate, samples_df, aggregate_table, "mid", family_scores)
 
         tabu_list.append(copy.deepcopy(candidate))
 
         if len(tabu_list) > tabu_size:
             tabu_list.pop(0)
 
-        if candidate_score > current_score:
+        if _improves(candidate_score, current_score):
             current = candidate
             current_score = candidate_score
 
-        if candidate_score > best_score:
+        if _improves(candidate_score, best_score):
             best = copy.deepcopy(candidate)
             best_score = candidate_score
 
-        trajectory.append(current_score)
+        trajectory.append(current_score[0])
+        if upper_trajectory is not None:
+            upper_trajectory.append(current_score[1])
 
     return best, trajectory
 
@@ -436,8 +507,20 @@ def evaluate_interval_bic(trajectory):
     return {
         "best_score": max(trajectory),
         "convergence_speed": len(trajectory),
-        "stability": np.var(trajectory)
+        "stability": np.var(trajectory) if np.isfinite(trajectory).all() else None
     }
+
+
+def rq2_ibic_results(trajectory):
+    """Encode the RQ2 search scores for JSON, retaining genuine unbounded values."""
+    metrics = evaluate_interval_bic(trajectory)
+    # Changed: JSON has no numeric -infinity. Preserve it explicitly and leave
+    # variance undefined when the trajectory contains any unbounded score.
+    saved = ["-Infinity" if score == -np.inf else score for score in trajectory]
+    if metrics["best_score"] == -np.inf:
+        metrics["best_score"] = "-Infinity"
+    metrics["scorer"] = IBICScorer.__name__
+    return metrics, saved
 
 
 def compute_shd(true_model, learned_edges):
@@ -551,6 +634,10 @@ def run_experiment_steps(
     # - chooses optimisation strategy (HC / RR / Tabu)
     # - returns best learned structure + score trajectory
     # ----------------------------------------------------
+    # Changed: All three searches share one RQ1 scorer per run, using the
+    # experiment's full interval width and no generating-network CPTs.
+    families = rq2_family_scores(samples_df, logical_constraints, mutation_strategy, interval_width)
+    upper_trajectory = []
     if search_method == "hill_climbing":
         
         # Hill Climbing call Including logical constraints as well
@@ -561,6 +648,8 @@ def run_experiment_steps(
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
             initial_edges=initial_edges,
+            family_scores=families,
+            upper_trajectory=upper_trajectory,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
@@ -576,6 +665,8 @@ def run_experiment_steps(
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
             initial_edges=initial_edges,
+            family_scores=families,
+            upper_trajectory=upper_trajectory,
             mutation_type=mutation_type,
             mutation_strategy=mutation_strategy
         )
@@ -589,6 +680,8 @@ def run_experiment_steps(
             logical_constraints=logical_constraints,
             max_in_degree=in_degree,
             initial_edges=initial_edges,
+            family_scores=families,
+            upper_trajectory=upper_trajectory,
             mutation_strategy=mutation_strategy,
             mutation_type=mutation_type
         )
@@ -607,7 +700,13 @@ def run_experiment_steps(
     # - how fast it converged
     # - stability of search trajectory
     # ----------------------------------------------------
-    bic_metrics = evaluate_interval_bic(trajectory)
+    bic_metrics, trajectory = rq2_ibic_results(trajectory)
+    # Changed: Record the secondary score even while the primary remains unbounded.
+    upper_trajectory = ["-Infinity" if x == float("-inf") else x for x in upper_trajectory]
+    bic_metrics["midpoint_tie_break"] = "upper_when_both_negative_infinity"
+    best_upper = sum(families.interval(node, [a for a, b in best_edges if b == node])[1]
+                     for node in nodes)
+    bic_metrics["selected_upper_score"] = "-Infinity" if best_upper == float("-inf") else best_upper
 
     # ----------------------------------------------------
     # STEP 7: Structural comparison to ground truth
@@ -679,6 +778,7 @@ def run_experiment_steps(
         "probability_sentences": evaluate_probability_sentences(learned_bn, lcn),
         "kl_divergence": kl,
         "interval_bic": bic_metrics,
+        "upper_trajectory": upper_trajectory,
         "trajectory": trajectory
     }
 
@@ -833,7 +933,12 @@ def summarise_rq2_results(
         shd = structure.get("shd", {})
         sentences = results.get("probability_sentences", {}).get("summary", {})
         ibic = results.get("interval_bic", {})
-        trajectory = results.get("trajectory", [])
+        # Changed: Read both historical numeric scores and lossless "-Infinity" values.
+        trajectory = [float(score) for score in results.get("trajectory", [])]
+        # Changed: Older JSON names the same scorer by its original RQ1 class name.
+        scorer_name = ibic.get("scorer", "legacy_aggregate")
+        if scorer_name == "RQ1FamilyScores":
+            scorer_name = IBICScorer.__name__
 
         # trajectory summaries
         traj_final = trajectory[-1] if trajectory else None
@@ -884,7 +989,10 @@ def summarise_rq2_results(
 
             # probabilistic / scoring metrics
             "kl_divergence": results.get("kl_divergence"),
-            "ibic_best_score": ibic.get("best_score"),
+            "ibic_selected_upper_score": ibic.get("selected_upper_score"),
+            "ibic_midpoint_tie_break": ibic.get("midpoint_tie_break"),
+            "ibic_scorer": scorer_name,
+            "ibic_best_score": float(ibic["best_score"]) if ibic.get("best_score") is not None else None,
             "ibic_convergence_speed": ibic.get("convergence_speed"),
             "ibic_stability": ibic.get("stability"),
 

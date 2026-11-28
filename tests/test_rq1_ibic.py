@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from scoring_functions.updated_ibic import RQ1FamilyScores, _empirical_bounds, binary_loglikelihood_bounds
+from scoring_functions.updated_ibic import IBICScorer, _empirical_bounds, binary_loglikelihood_bounds
 from structure_learning.hill_climbing import run_interval_bic_hillclimb
 
 
@@ -17,7 +17,7 @@ class TestRQ1IBIC(unittest.TestCase):
         )
 
     def test_empirical_singletons_root_addition_and_reversal(self):
-        scores = RQ1FamilyScores(self.data, [], interval_width=0)
+        scores = IBICScorer(self.data, [], interval_width=0)
         root = 10 * math.log(0.5) - math.log(10) / 2
         conditional = 8 * math.log(0.8) + 2 * math.log(0.2) - math.log(10)
         for left, right in (("X", "Y"), ("Y", "X")):
@@ -38,18 +38,18 @@ class TestRQ1IBIC(unittest.TestCase):
         self.assertEqual(_empirical_bounds(5, 5, 0.4), (0.8, 1.0))
         for width in (-0.1, 1.1, math.nan):
             with self.assertRaises(ValueError):
-                RQ1FamilyScores(self.data, [], interval_width=width)
+                IBICScorer(self.data, [], interval_width=width)
 
     # Change done: a tied midpoint may improve the upper endpoint while remaining -inf.
     def test_unbounded_start(self):
         data = pd.DataFrame([(0, 0)] * 80 + [(1, 0)] * 16 + [(1, 1)] * 4, columns=["A", "Y"])
         for rank in ("low", "mid"):
-            fit = RQ1FamilyScores(data, [], interval_width=0.2)
+            fit = IBICScorer(data, [], interval_width=0.2)
             edges, score = run_interval_bic_hillclimb(data, None, rank, family_scores=fit)
             self.assertEqual(set(edges), {("A", "Y")})
             self.assertTrue(math.isfinite(score))
             tied = data.assign(A=data["Y"])
-            fit = RQ1FamilyScores(tied, [], interval_width=0.2)
+            fit = IBICScorer(tied, [], interval_width=0.2)
             edges, score = run_interval_bic_hillclimb(tied, None, rank, family_scores=fit)
             self.assertEqual(len(edges), int(rank == "mid"))
             self.assertEqual(score, -math.inf)
@@ -59,7 +59,7 @@ class TestRQ1IBIC(unittest.TestCase):
         pair = [(0, 0)] * 80 + [(1, 0)] * 16 + [(1, 1)] * 4
         data = pd.DataFrame([left + right for left in pair for right in pair],
                             columns=["A", "Y", "B", "Z"])
-        fit = RQ1FamilyScores(data, [], interval_width=0.2)
+        fit = IBICScorer(data, [], interval_width=0.2)
         edges, score = run_interval_bic_hillclimb(data, None, "mid", family_scores=fit)
         self.assertEqual(set(edges), {("A", "Y"), ("B", "Z")})
         self.assertTrue(math.isfinite(score))
@@ -77,7 +77,7 @@ class TestRQ1IBIC(unittest.TestCase):
     def test_rules_fix_rows_and_only_impossible_configurations_lose_dimension(self):
         data = pd.DataFrame({"X": [0, 0, 1, 1], "Y": [0, 0, 1, 1], "Z": [0, 1, 0, 1]})
         rule = {"if": {"X": True}, "then": {"Y": True}}
-        fit = RQ1FamilyScores(data, [rule], interval_width=0)
+        fit = IBICScorer(data, [rule], interval_width=0)
         for score in fit.interval("Y", ["X"]):
             self.assertAlmostEqual(score, -math.log(4) / 2)
         # (X=0,Y=1) is possible but unobserved. (X=1,Y=0) is impossible.
@@ -89,7 +89,7 @@ class TestRQ1IBIC(unittest.TestCase):
     def test_supplied_cpt_uses_both_state_bounds_and_observed_counts(self):
         lcn = {"edges": [], "credal_sets": {"X": {"[]": {"True": [0.1, 0.7],
                                                           "False": [0.4, 0.8]}}}}
-        fit = RQ1FamilyScores(self.data[["X"]], [], generating_lcn=lcn)
+        fit = IBICScorer(self.data[["X"]], [], generating_lcn=lcn)
         low, high = fit.interval("X", [])
         penalty = math.log(10) / 2
         self.assertAlmostEqual(low, 5 * math.log(0.2 * 0.8) - penalty)

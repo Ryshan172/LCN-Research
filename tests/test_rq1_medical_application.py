@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from scoring_functions.updated_ibic import RQ1FamilyScores
+from scoring_functions.updated_ibic import IBICScorer
 from workflows.app_lcn_gen import optimize_lcn_ibic
 from workflows.application_workflow import convert_lcn_to_bn
 
@@ -20,7 +20,7 @@ class TestMedicalIBIC(unittest.TestCase):
             result = optimize_lcn_ibic(initial, df, max_iters=1)
         self.assertEqual(result["edges"], [("A", "Y")])
         self.assertEqual(result["ibic_score"], -math.inf)
-        fit = RQ1FamilyScores(df, [])
+        fit = IBICScorer(df, [])
         self.assertEqual(result["credal_sets"]["Y"], fit.fitted_cpt("Y", ["A"]))
         low, mid, high = convert_lcn_to_bn(result, complementary=True)
         for bn, expected in [(low, 0.9), (mid, 0.95), (high, 1.0)]:
@@ -33,6 +33,6 @@ class TestMedicalIBIC(unittest.TestCase):
         result = optimize_lcn_ibic(initial, df, max_iters=0)
         self.assertEqual(result["edges"], [("A", "Y")])
         self.assertEqual(result["credal_sets"]["Y"]["[A=False]"]["True"], [0.0, 0.0])
-        fit = RQ1FamilyScores(df, [rule])
+        fit = IBICScorer(df, [rule])
         expected = sum(sum(fit.interval(n, parents)) / 2 for n, parents in [("A", []), ("Y", ["A"])])
         self.assertAlmostEqual(result["ibic_score"], expected)
